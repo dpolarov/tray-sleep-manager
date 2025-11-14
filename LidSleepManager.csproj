@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>LidSleepManager</AssemblyName>
+    <ApplicationIcon>app.ico</ApplicationIcon>
     
     <!-- Single file publish settings - without runtime -->
     <PublishSingleFile>true</PublishSingleFile>

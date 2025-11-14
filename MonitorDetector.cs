@@ -75,48 +75,86 @@ namespace LidSleepManager
 
         public static bool HasExternalMonitor()
         {
-            // Используем количество активных дисплеев
+            // ПРОСТАЯ ЛОГИКА: если физически подключено 2+ монитора - есть внешний
+            int totalMonitors = GetTotalMonitorCountWMI();
+            
+            // Если WMI показывает 2+ монитора - точно есть внешний
+            if (totalMonitors >= 2)
+                return true;
+            
+            // Дополнительная проверка через активные дисплеи
             int activeCount = GetMonitorCount();
             
-            // Если больше 1 дисплея - точно есть внешний
+            // Если больше 1 активного дисплея - точно есть внешний
             if (activeCount > 1)
                 return true;
             
-            // Если 1 дисплей - проверяем несколько условий
-            if (activeCount == 1)
+            // Если 1 активный, но WMI недоступен - проверяем по названию
+            if (totalMonitors == 0 && activeCount == 1)
             {
-                // Проверка 1: Если единственный активный дисплей - это DISPLAY2 или выше,
-                // значит это внешний монитор (встроенный обычно DISPLAY1)
-                var screens = Screen.AllScreens;
-                if (screens.Length > 0)
-                {
-                    string deviceName = screens[0].DeviceName;
-                    // Извлекаем номер дисплея (например, из "\\.\DISPLAY2" получаем "2")
-                    if (deviceName.Contains("DISPLAY"))
-                    {
-                        // Ищем позицию "DISPLAY" и берем число после него
-                        int displayIndex = deviceName.IndexOf("DISPLAY");
-                        if (displayIndex >= 0)
-                        {
-                            string numStr = deviceName.Substring(displayIndex + 7); // "DISPLAY".Length = 7
-                            if (int.TryParse(numStr, out int displayNum) && displayNum > 1)
-                            {
-                                // Активен DISPLAY2 или выше - это внешний монитор
-                                return true;
-                            }
-                        }
-                    }
-                }
-                
-                // Проверка 2: Проверяем сколько всего мониторов подключено через WMI
-                int totalMonitors = GetTotalMonitorCountWMI();
-                
-                // Если физически подключено >= 2 монитора, значит один из них внешний
-                if (totalMonitors >= 2)
-                    return true;
+                return IsExternalMonitorActive();
             }
             
             return false;
+        }
+        
+        private static bool IsExternalMonitorActive()
+        {
+            try
+            {
+                // Получаем список всех активных дисплеев
+                var displays = GetActiveDisplays();
+                
+                if (displays.Count != 1)
+                    return false;
+                
+                var display = displays[0];
+                string deviceString = display.DeviceString.ToLower();
+                string friendlyName = display.FriendlyName.ToLower();
+                
+                // Признаки встроенного дисплея:
+                // 1. Название совпадает с устройством (например, "\\.\DISPLAY2" == "\\.\DISPLAY2")
+                if (display.DeviceString == display.DeviceName || 
+                    deviceString.StartsWith("\\\\.\\display"))
+                {
+                    return false; // Это встроенный дисплей
+                }
+                
+                // 2. Содержит "Generic PnP Monitor" или просто "Generic"
+                if (deviceString.Contains("generic pnp monitor") ||
+                    deviceString.Contains("generic monitor") ||
+                    (deviceString == "generic" || friendlyName == "generic"))
+                {
+                    return false; // Встроенный
+                }
+                
+                // 3. Название пустое или очень короткое (меньше 5 символов)
+                if (string.IsNullOrWhiteSpace(friendlyName) || friendlyName.Length < 5)
+                {
+                    return false; // Встроенный
+                }
+                
+                // Признаки внешнего монитора:
+                // 1. Имеет конкретное название производителя
+                bool hasManufacturer = 
+                    friendlyName.Contains("dell") || friendlyName.Contains("hp") ||
+                    friendlyName.Contains("samsung") || friendlyName.Contains("lg") ||
+                    friendlyName.Contains("acer") || friendlyName.Contains("asus") ||
+                    friendlyName.Contains("benq") || friendlyName.Contains("philips") ||
+                    friendlyName.Contains("aoc") || friendlyName.Contains("viewsonic") ||
+                    friendlyName.Contains("lenovo");
+                
+                // 2. Имеет модель с цифрами (P24h-10, U2720Q и т.д.)
+                bool hasModelNumber = 
+                    System.Text.RegularExpressions.Regex.IsMatch(friendlyName, @"[a-z]\d{2}") ||
+                    System.Text.RegularExpressions.Regex.IsMatch(friendlyName, @"\d{2}[a-z]");
+                
+                return hasManufacturer || hasModelNumber;
+            }
+            catch
+            {
+                return false;
+            }
         }
         
         public static int GetAttachedDisplayCount()
@@ -128,7 +166,37 @@ namespace LidSleepManager
         {
             try
             {
+                // Пробуем через Win32_PnPEntity - видит все устройства, даже отключенные
                 int count = 0;
+                using (var searcher = new ManagementObjectSearcher(
+                    "SELECT * FROM Win32_PnPEntity WHERE (PNPClass = 'Monitor' OR Caption LIKE '%Monitor%' OR Caption LIKE '%Display%')"))
+                {
+                    foreach (ManagementObject device in searcher.Get())
+                    {
+                        try
+                        {
+                            string caption = device["Caption"]?.ToString() ?? "";
+                            string pnpClass = device["PNPClass"]?.ToString() ?? "";
+                            
+                            // Исключаем виртуальные мониторы и драйверы
+                            if (!string.IsNullOrEmpty(caption) && 
+                                !caption.Contains("Microsoft") &&
+                                !caption.Contains("Remote") &&
+                                !caption.Contains("Virtual") &&
+                                (pnpClass == "Monitor" || caption.ToLower().Contains("display")))
+                            {
+                                count++;
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                
+                // Если нашли мониторы, возвращаем
+                if (count > 0)
+                    return count;
+                
+                // Иначе пробуем через WmiMonitorID
                 using (var searcher = new ManagementObjectSearcher("root\\WMI", 
                     "SELECT * FROM WmiMonitorID"))
                 {
@@ -137,6 +205,13 @@ namespace LidSleepManager
                         count++;
                     }
                 }
+                
+                // Если WMI вернул 0, используем fallback
+                if (count == 0)
+                {
+                    return GetAttachedDisplayCountFallback();
+                }
+                
                 return count;
             }
             catch
@@ -149,7 +224,7 @@ namespace LidSleepManager
         private static int GetAttachedDisplayCountFallback()
         {
             // Считаем все мониторы через EnumDisplayDevices (включая неактивные)
-            var allDevices = new List<string>();
+            var uniqueMonitors = new HashSet<string>();
             uint devNum = 0;
             
             // Перечисляем видеоадаптеры
@@ -171,9 +246,12 @@ namespace LidSleepManager
                     if (!EnumDisplayDevices(adapter.DeviceName, monNum, ref monitor, 0))
                         break;
                     
-                    if (!string.IsNullOrEmpty(monitor.DeviceString))
+                    // Добавляем только уникальные мониторы с непустыми названиями
+                    if (!string.IsNullOrEmpty(monitor.DeviceString) && 
+                        !string.IsNullOrEmpty(monitor.DeviceID))
                     {
-                        allDevices.Add(monitor.DeviceString);
+                        // Используем DeviceID как уникальный идентификатор
+                        uniqueMonitors.Add(monitor.DeviceID);
                     }
                     
                     monNum++;
@@ -182,7 +260,7 @@ namespace LidSleepManager
                 devNum++;
             }
             
-            return allDevices.Count;
+            return uniqueMonitors.Count;
         }
 
         public static int GetMonitorCount()

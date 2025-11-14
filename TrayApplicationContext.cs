@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Media;
 using Microsoft.Win32;
@@ -10,14 +11,19 @@ namespace LidSleepManager
     {
         private NotifyIcon trayIcon;
         private Timer monitorCheckTimer;
+        private Timer autoSleepTimer;
         private bool hasExternalMonitor = false;
         private bool wasLidClosed = false;
+        private bool isDisplayOff = false;
+        private bool isLidClosed = false;
+        private DateTime? displayOffTime = null;
         private Icon blueIcon;
         private Icon yellowIcon;
         private Icon darkBlueIcon;
         private Icon darkYellowIcon;
         private WorkMode currentMode = WorkMode.Auto;
         private LidActionManager lidActionManager = new LidActionManager();
+        private ToolStripMenuItem statusMenuItem = null!;
 
         public TrayApplicationContext()
         {
@@ -44,12 +50,21 @@ namespace LidSleepManager
             monitorCheckTimer.Tick += OnMonitorCheckTimerTick;
             monitorCheckTimer.Start();
 
+            // Initialize timer for auto-sleep functionality
+            autoSleepTimer = new Timer();
+            autoSleepTimer.Interval = 1000; // Check every 1 second
+            autoSleepTimer.Tick += OnAutoSleepTimerTick;
+            autoSleepTimer.Start();
+
             // Subscribe to system events
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
             SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+            SystemEvents.SessionSwitch += OnSessionSwitch;
 
             // Initial check - сразу проверяем мониторы и применяем настройки
             hasExternalMonitor = MonitorDetector.HasExternalMonitor();
+            CheckLidState();
+            UpdateDisplayState();
             UpdatePowerState();
         }
 
@@ -57,9 +72,9 @@ namespace LidSleepManager
         {
             var menu = new ContextMenuStrip();
             
-            var statusItem = new ToolStripMenuItem("Статус");
-            statusItem.Click += OnStatusClick;
-            menu.Items.Add(statusItem);
+            statusMenuItem = new ToolStripMenuItem("Статус");
+            statusMenuItem.Click += OnStatusClick;
+            menu.Items.Add(statusMenuItem);
             
             menu.Items.Add(new ToolStripSeparator());
             
@@ -71,11 +86,11 @@ namespace LidSleepManager
             autoModeItem.Checked = true;
             modeItem.DropDownItems.Add(autoModeItem);
             
-            var alwaysPreventItem = new ToolStripMenuItem("🟡 Всегда не засыпать");
+            var alwaysPreventItem = new ToolStripMenuItem("🟠 Всегда не засыпать");
             alwaysPreventItem.Click += (s, e) => SetMode(WorkMode.AlwaysPrevent);
             modeItem.DropDownItems.Add(alwaysPreventItem);
             
-            var alwaysAllowItem = new ToolStripMenuItem("🔵 Всегда засыпать");
+            var alwaysAllowItem = new ToolStripMenuItem("🔷 Всегда засыпать");
             alwaysAllowItem.Click += (s, e) => SetMode(WorkMode.AlwaysAllow);
             modeItem.DropDownItems.Add(alwaysAllowItem);
             
@@ -86,6 +101,18 @@ namespace LidSleepManager
             var restoreItem = new ToolStripMenuItem("Восстановить настройки крышки");
             restoreItem.Click += OnRestoreLidSettingsClick;
             menu.Items.Add(restoreItem);
+            
+            menu.Items.Add(new ToolStripSeparator());
+            
+            var sleepNowItem = new ToolStripMenuItem("💤 Заснуть сейчас");
+            sleepNowItem.Click += OnSleepNowClick;
+            menu.Items.Add(sleepNowItem);
+            
+            menu.Items.Add(new ToolStripSeparator());
+            
+            var openLogItem = new ToolStripMenuItem("📋 Открыть лог");
+            openLogItem.Click += OnOpenLogClick;
+            menu.Items.Add(openLogItem);
             
             menu.Items.Add(new ToolStripSeparator());
             
@@ -101,6 +128,18 @@ namespace LidSleepManager
         
         private void UpdateMenuCheckmarks(ContextMenuStrip menu)
         {
+            // Обновляем текст статуса с текущим режимом и состоянием
+            string modeText = currentMode switch
+            {
+                WorkMode.Auto => "🔄 Авто",
+                WorkMode.AlwaysPrevent => "🟠 Не засыпать",
+                WorkMode.AlwaysAllow => "🔷 Засыпать",
+                _ => "?"
+            };
+            
+            string stateText = PowerManager.IsPreventingSleep() ? "Защита активна" : "Сон разрешен";
+            statusMenuItem.Text = $"Статус: {modeText} • {stateText}";
+            
             var modeMenuItem = menu.Items[2] as ToolStripMenuItem;
             if (modeMenuItem != null)
             {
@@ -136,6 +175,71 @@ namespace LidSleepManager
         private void OnMonitorCheckTimerTick(object? sender, EventArgs e)
         {
             UpdateMonitorStatus();
+            UpdateDisplayState();
+        }
+
+        private void OnAutoSleepTimerTick(object? sender, EventArgs e)
+        {
+            // Проверяем условия для автоматического сна
+            // Только в автоматическом режиме
+            if (currentMode != WorkMode.Auto)
+                return;
+
+            // Проверяем: крышка закрыта И дисплей выключен
+            if (isLidClosed && isDisplayOff && displayOffTime.HasValue)
+            {
+                // Вычисляем сколько времени прошло с момента выключения дисплея
+                TimeSpan elapsed = DateTime.Now - displayOffTime.Value;
+                
+                if (elapsed.TotalSeconds >= 10)
+                {
+                    // Прошло 10 секунд - отправляем в сон
+                    TriggerAutoSleep();
+                }
+            }
+        }
+
+        private void UpdateDisplayState()
+        {
+            try
+            {
+                // Проверяем количество активных мониторов
+                int activeMonitors = MonitorDetector.GetMonitorCount();
+                bool currentDisplayOff = (activeMonitors == 0);
+
+                // Если состояние изменилось
+                if (currentDisplayOff != isDisplayOff)
+                {
+                    isDisplayOff = currentDisplayOff;
+                    
+                    if (isDisplayOff)
+                    {
+                        // Дисплей только что выключился - запоминаем время
+                        displayOffTime = DateTime.Now;
+                    }
+                    else
+                    {
+                        // Дисплей включился - сбрасываем таймер
+                        displayOffTime = null;
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private void TriggerAutoSleep()
+        {
+            // Отправляем ноутбук в спящий режим
+            bool success = PowerManager.GoToSleep();
+            
+            // Сбрасываем таймеры в любом случае
+            displayOffTime = null;
+            
+            if (!success)
+            {
+                // Логируем ошибку, но не показываем пользователю
+                System.Diagnostics.Debug.WriteLine("Failed to trigger auto sleep");
+            }
         }
 
         private void UpdateMonitorStatus()
@@ -256,6 +360,100 @@ namespace LidSleepManager
         private void OnDisplaySettingsChanged(object? sender, EventArgs e)
         {
             UpdateMonitorStatus();
+            UpdateDisplayState();
+        }
+
+        private void OnSessionSwitch(object sender, SessionSwitchEventArgs e)
+        {
+            // Отслеживаем события сессии для определения состояния крышки
+            switch (e.Reason)
+            {
+                case SessionSwitchReason.SessionLock:
+                    // Сессия заблокирована - может быть из-за закрытия крышки
+                    // Дополнительно проверяем через задержку
+                    Task.Delay(500).ContinueWith(_ => CheckLidState());
+                    break;
+                    
+                case SessionSwitchReason.SessionUnlock:
+                    // Сессия разблокирована - крышка открыта
+                    isLidClosed = false;
+                    displayOffTime = null;
+                    break;
+            }
+        }
+
+        private void CheckLidState()
+        {
+            try
+            {
+                // Проверяем количество мониторов
+                int monitorCount = MonitorDetector.GetMonitorCount();
+                int attachedCount = MonitorDetector.GetAttachedDisplayCount();
+                
+                // Случай 1: Нет активных мониторов вообще - крышка закрыта и дисплей выключен
+                if (monitorCount == 0)
+                {
+                    isLidClosed = true;
+                }
+                // Случай 2: Есть внешние мониторы (физически подключено >= 2)
+                // но активен только 1 - вероятно крышка закрыта
+                else if (attachedCount >= 2 && monitorCount == 1)
+                {
+                    isLidClosed = true;
+                }
+                // Случай 3: Один монитор и нет внешнего - встроенный активен, крышка открыта
+                else if (monitorCount == 1 && attachedCount == 1)
+                {
+                    isLidClosed = false;
+                }
+                // Случай 4: Несколько активных мониторов - работаем с открытой или закрытой крышкой
+                // Не можем точно определить, считаем что крышка может быть закрыта
+                else if (monitorCount > 1)
+                {
+                    // Если было 2+ монитора и стал 1, возможно закрыли крышку
+                    // Более детальная проверка через встроенный дисплей
+                    isLidClosed = !IsBuiltInDisplayActive();
+                }
+                else
+                {
+                    isLidClosed = false;
+                }
+            }
+            catch { }
+        }
+
+        private bool IsBuiltInDisplayActive()
+        {
+            try
+            {
+                // Получаем список всех активных дисплеев
+                var displays = MonitorDetector.GetActiveDisplays();
+                
+                // Встроенный дисплей обычно имеет имя содержащее "Generic PnP Monitor"
+                // или "Дисплей с разъемом Plug and Play" или "LCD"
+                foreach (var display in displays)
+                {
+                    string deviceString = display.DeviceString.ToLower();
+                    string friendlyName = display.FriendlyName.ToLower();
+                    
+                    // Проверяем признаки встроенного дисплея
+                    if (deviceString.Contains("generic") ||
+                        deviceString.Contains("pnp") ||
+                        deviceString.Contains("lcd") ||
+                        friendlyName.Contains("lcd") ||
+                        friendlyName.Contains("laptop") ||
+                        display.DeviceName.Contains("DISPLAY1"))
+                    {
+                        return true;
+                    }
+                }
+                
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private void OnTrayIconDoubleClick(object? sender, EventArgs e)
@@ -300,6 +498,98 @@ namespace LidSleepManager
                         "Ошибка",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private void OnOpenLogClick(object? sender, EventArgs e)
+        {
+            try
+            {
+                string logFile = PowerManager.GetLogFile();
+                
+                // Проверяем существует ли файл
+                if (System.IO.File.Exists(logFile))
+                {
+                    // Открываем в Notepad
+                    System.Diagnostics.Process.Start("notepad.exe", logFile);
+                }
+                else
+                {
+                    // Создаем папку и файл если их нет
+                    string dir = System.IO.Path.GetDirectoryName(logFile);
+                    if (!System.IO.Directory.Exists(dir))
+                    {
+                        System.IO.Directory.CreateDirectory(dir);
+                    }
+                    
+                    System.IO.File.WriteAllText(logFile, 
+                        $"Лог создан: {DateTime.Now}\r\n" +
+                        $"Файл лога будет содержать информацию о попытках перехода в спящий режим.\r\n\r\n");
+                    
+                    MessageBox.Show(
+                        $"Файл лога создан:\n{logFile}\n\n" +
+                        "После использования функции 'Заснуть сейчас' здесь появится информация о попытках перехода в сон.",
+                        "Лог",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    
+                    System.Diagnostics.Process.Start("notepad.exe", logFile);
+                }
+            }
+            catch (Exception ex)
+            {
+                SystemSounds.Hand.Play();
+                MessageBox.Show(
+                    $"Не удалось открыть файл лога.\n\n" +
+                    $"Ошибка: {ex.Message}",
+                    "Ошибка",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+        }
+
+        private void OnSleepNowClick(object? sender, EventArgs e)
+        {
+            // Показываем предупреждение перед переходом в сон
+            var result = MessageBox.Show(
+                "Компьютер сейчас уйдет в спящий режим.\n\n" +
+                "⚠️ Рекомендация: Закройте Slack, Teams, Chrome\n" +
+                "для надежного перехода в сон.\n\n" +
+                "Продолжить?",
+                "Подтверждение",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+            
+            if (result == DialogResult.Yes)
+            {
+                // Даем время закрыть диалог
+                System.Threading.Thread.Sleep(500);
+                
+                if (!PowerManager.GoToSleep())
+                {
+                    SystemSounds.Hand.Play();
+                    string logFile = PowerManager.GetLogFile();
+                    var errorResult = MessageBox.Show(
+                        "Не удалось перевести компьютер в спящий режим.\n\n" +
+                        "Возможные причины:\n" +
+                        "- Заблокировано групповыми политиками Windows\n" +
+                        "- Открыты приложения, блокирующие сон\n" +
+                        "- Требуются права администратора\n\n" +
+                        $"Лог ошибок сохранен в:\n{logFile}\n\n" +
+                        "Открыть файл лога?",
+                        "Ошибка",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Error);
+                    
+                    if (errorResult == DialogResult.Yes)
+                    {
+                        try
+                        {
+                            System.Diagnostics.Process.Start("notepad.exe", logFile);
+                        }
+                        catch { }
+                    }
                 }
             }
         }
@@ -358,9 +648,13 @@ namespace LidSleepManager
             // Cleanup
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
             SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+            SystemEvents.SessionSwitch -= OnSessionSwitch;
             
             monitorCheckTimer.Stop();
             monitorCheckTimer.Dispose();
+            
+            autoSleepTimer.Stop();
+            autoSleepTimer.Dispose();
             
             trayIcon.Visible = false;
             trayIcon.Dispose();
