@@ -5,7 +5,7 @@ using System.Windows.Forms;
 using System.Media;
 using Microsoft.Win32;
 
-namespace LidSleepManager
+namespace SleepMngr
 {
     public class TrayApplicationContext : ApplicationContext
     {
@@ -39,7 +39,7 @@ namespace LidSleepManager
                 Icon = blueIcon,
                 ContextMenuStrip = CreateContextMenu(),
                 Visible = true,
-                Text = "Lid Sleep Manager"
+                Text = "SleepMngr"
             };
 
             trayIcon.DoubleClick += OnTrayIconDoubleClick;
@@ -310,7 +310,7 @@ namespace LidSleepManager
             
             // Устанавливаем иконку в соответствии с режимом
             trayIcon.Icon = selectedIcon;
-            trayIcon.Text = $"Lid Sleep Manager - {modeText}";
+            trayIcon.Text = $"Sleep Manager - {modeText}";
             
             // Воспроизводим звук при изменении состояния
             if (wasPreventingSleep != shouldPreventSleep)

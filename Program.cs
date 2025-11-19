@@ -4,12 +4,12 @@ using System.Windows.Forms;
 using System.Diagnostics;
 using System.Linq;
 
-namespace LidSleepManager
+namespace SleepMngr
 {
     static class Program
     {
         private static Mutex? _mutex = null;
-        private const string MutexName = "Global\\LidSleepManager_SingleInstance";
+        private const string MutexName = "Global\\SleepMngr_SingleInstance";
 
         [STAThread]
         static void Main()

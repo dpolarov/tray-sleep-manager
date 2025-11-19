@@ -14,7 +14,7 @@ if %ERRORLEVEL% EQU 0 (
     echo ✓ Сборка успешна!
     echo ========================================
     echo.
-    echo Результат: bin\Release\net8.0-windows\win-x64\publish\LidSleepManager.exe
+    echo Результат: bin\Release\net8.0-windows\win-x64\publish\SleepMngr.exe
     echo.
     explorer bin\Release\net8.0-windows\win-x64\publish
 ) else (

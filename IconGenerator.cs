@@ -2,7 +2,7 @@ using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 
-namespace LidSleepManager
+namespace SleepMngr
 {
     public static class IconGenerator
     {

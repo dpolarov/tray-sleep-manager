@@ -5,7 +5,7 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
-    <AssemblyName>LidSleepManager</AssemblyName>
+    <AssemblyName>SleepMngr</AssemblyName>
     <ApplicationIcon>app.ico</ApplicationIcon>
     
     <!-- Single file publish settings - without runtime -->

@@ -2,7 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 
-namespace LidSleepManager
+namespace SleepMngr
 {
     public class LidActionManager
     {

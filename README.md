@@ -1,4 +1,4 @@
-# Lid Sleep Manager
+# SleepMngr
 
 Программа для Windows, которая предотвращает переход ноутбука в спящий режим при закрытии крышки, если подключен внешний монитор.
 
@@ -56,11 +56,11 @@
 dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true
 ```
 
-**Результат:** `bin\Release\net8.0-windows\win-x64\publish\LidSleepManager.exe`
+**Результат:** `bin\Release\net8.0-windows\win-x64\publish\SleepMngr.exe`
 
 **Характеристики:**
 - ✅ Размер: **~200 КБ**
-- ✅ Один EXE файл (упакованы: LidSleepManager.dll + System.Management.dll)
+- ✅ Один EXE файл (упакованы: SleepMngr.dll + System.Management.dll)
 - ⚠️ Требует: [.NET 8.0 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) на целевой системе
 
 **Когда использовать:** Для личного использования или распространения в организации, где .NET Runtime уже установлен.
@@ -73,7 +73,7 @@ dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile
 dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 ```
 
-**Результат:** `bin\Release\net8.0-windows\win-x64\publish\LidSleepManager.exe`
+**Результат:** `bin\Release\net8.0-windows\win-x64\publish\SleepMngr.exe`
 
 **Характеристики:**
 - ✅ Размер: **~65 МБ**
@@ -102,7 +102,7 @@ dotnet build -c Release
 
 ## Запуск
 
-1. Запустите `LidSleepManager.exe`
+1. Запустите `SleepMngr.exe`
 2. Программа появится в системном трее (правый нижний угол)
 3. При подключении внешнего монитора иконка изменится на щит
 4. Двойной клик по иконке покажет текущий статус
@@ -125,7 +125,7 @@ dotnet build -c Release
 
 1. Нажмите `Win + R`
 2. Введите `shell:startup` и нажмите Enter
-3. Создайте ярлык `LidSleepManager.exe` в открывшейся папке
+3. Создайте ярлык `SleepMngr.exe` в открывшейся папке
 
 ## Как это работает
 
@@ -241,7 +241,7 @@ dotnet build -c Release
 **"Заснуть сейчас" не работает:**
 - Программа пробует 5 разных методов перехода в сон по очереди
 - При ошибке появится диалог с предложением открыть файл лога
-- Файл лога: `%AppData%\LidSleepManager\sleep_log.txt`
+- Файл лога: `%AppData%\SleepMngr\sleep_log.txt`
 - В логе указано какие методы пробовались и почему не сработали
 - Обычно работает Метод 1 (`Application.SetSuspendState`) без прав администратора
 - Если ни один не работает:
@@ -262,12 +262,12 @@ dotnet build -c Release
 ## Структура проекта
 
 ```
-LidSleepManager/
+SleepMngr/
 ├── build-compact.cmd          # Сборка компактного EXE
 ├── build-standalone.cmd       # Сборка автономного EXE
 ├── build-debug.cmd           # Обычная сборка для разработки
 ├── clean.cmd                 # Очистка файлов сборки
-├── LidSleepManager.csproj    # Конфигурация проекта
+├── SleepMngr.csproj    # Конфигурация проекта
 ├── Program.cs                # Точка входа, single instance
 ├── TrayApplicationContext.cs # Основная логика, UI трея
 ├── MonitorDetector.cs        # Определение мониторов

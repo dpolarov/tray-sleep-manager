@@ -5,13 +5,13 @@ using System.Windows.Forms;
 using System.IO;
 using System.Collections.Generic;
 
-namespace LidSleepManager
+namespace SleepMngr
 {
     public class PowerManager
     {
         private static string logFile = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "LidSleepManager",
+            "SleepMngr",
             "sleep_log.txt");
         
         private static void Log(string message)
@@ -130,7 +130,7 @@ namespace LidSleepManager
             bool wasPreventingSleepClassic = isPreventingSleep;
             if (wasPreventingSleepClassic)
             {
-                Log("Releasing sleep prevention lock from LidSleepManager");
+                Log("Releasing sleep prevention lock from SleepMngr");
                 SetThreadExecutionState(EXECUTION_STATE.ES_CONTINUOUS);
                 isPreventingSleep = false;
                 

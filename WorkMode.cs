@@ -1,4 +1,4 @@
-namespace LidSleepManager
+namespace SleepMngr
 {
     public enum WorkMode
     {
