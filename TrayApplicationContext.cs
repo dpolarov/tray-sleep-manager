@@ -24,6 +24,9 @@ namespace SleepMngr
         private WorkMode currentMode = WorkMode.Auto;
         private LidActionManager lidActionManager = new LidActionManager();
         private ToolStripMenuItem statusMenuItem = null!;
+        private bool autoSleepTriggered = false;
+        private bool wasClamshellMode = false;
+        private DateTime? externalDisconnectedTime = null;
 
         public TrayApplicationContext()
         {
@@ -176,6 +179,7 @@ namespace SleepMngr
         {
             UpdateMonitorStatus();
             UpdateDisplayState();
+            CheckLidState();
         }
 
         private void OnAutoSleepTimerTick(object? sender, EventArgs e)
@@ -185,16 +189,32 @@ namespace SleepMngr
             if (currentMode != WorkMode.Auto)
                 return;
 
-            // Проверяем: крышка закрыта И дисплей выключен
+            // Если сон уже был запрошен - не повторяем
+            if (autoSleepTriggered)
+                return;
+
+            // Условие 1: крышка закрыта И дисплей выключен
             if (isLidClosed && isDisplayOff && displayOffTime.HasValue)
             {
-                // Вычисляем сколько времени прошло с момента выключения дисплея
                 TimeSpan elapsed = DateTime.Now - displayOffTime.Value;
                 
                 if (elapsed.TotalSeconds >= 10)
                 {
-                    // Прошло 10 секунд - отправляем в сон
                     TriggerAutoSleep();
+                    return;
+                }
+            }
+            
+            // Условие 2: внешний монитор был отключён в clamshell-режиме
+            // Ждём 3 секунды после отключения и принудительно засыпаем
+            if (externalDisconnectedTime.HasValue && !hasExternalMonitor)
+            {
+                TimeSpan elapsed = DateTime.Now - externalDisconnectedTime.Value;
+                if (elapsed.TotalSeconds >= 3)
+                {
+                    externalDisconnectedTime = null;
+                    TriggerAutoSleep();
+                    return;
                 }
             }
         }
@@ -229,6 +249,8 @@ namespace SleepMngr
 
         private void TriggerAutoSleep()
         {
+            autoSleepTriggered = true;
+
             // Отправляем ноутбук в спящий режим
             bool success = PowerManager.GoToSleep();
             
@@ -246,10 +268,32 @@ namespace SleepMngr
         {
             bool currentHasExternalMonitor = MonitorDetector.HasExternalMonitor();
             
+            // Пока внешний монитор подключён — отслеживаем clamshell-режим
+            // Если 1 активный дисплей при подключённом внешнем = крышка закрыта (clamshell)
+            if (currentHasExternalMonitor)
+            {
+                int activeCount = MonitorDetector.GetMonitorCount();
+                wasClamshellMode = (activeCount <= 1);
+            }
+            
             if (currentHasExternalMonitor != hasExternalMonitor)
             {
+                bool wasExternal = hasExternalMonitor;
                 hasExternalMonitor = currentHasExternalMonitor;
                 UpdatePowerState();
+                
+                // Монитор подключён обратно — сбрасываем флаги
+                if (currentHasExternalMonitor)
+                {
+                    autoSleepTriggered = false;
+                    externalDisconnectedTime = null;
+                }
+                
+                // Внешний монитор отключён — если были в clamshell, запускаем таймер на сон
+                if (wasExternal && !currentHasExternalMonitor && currentMode == WorkMode.Auto && wasClamshellMode)
+                {
+                    externalDisconnectedTime = DateTime.Now;
+                }
             }
         }
 
@@ -378,6 +422,7 @@ namespace SleepMngr
                     // Сессия разблокирована - крышка открыта
                     isLidClosed = false;
                     displayOffTime = null;
+                    autoSleepTriggered = false;
                     break;
             }
         }
