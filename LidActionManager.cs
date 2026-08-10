@@ -124,7 +124,11 @@ namespace SleepMngr
                     return string.Empty;
 
                 string output = process.StandardOutput.ReadToEnd();
-                process.WaitForExit();
+                if (!process.WaitForExit(5000))
+                {
+                    try { process.Kill(); } catch { }
+                    return output;
+                }
                 return output;
             }
         }

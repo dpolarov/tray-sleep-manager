@@ -168,9 +168,11 @@ namespace SleepMngr
             {
                 // Пробуем через Win32_PnPEntity - видит все устройства, даже отключенные
                 int count = 0;
+                var wmiOptions = new EnumerationOptions { Timeout = TimeSpan.FromSeconds(3) };
                 using (var searcher = new ManagementObjectSearcher(
                     "SELECT * FROM Win32_PnPEntity WHERE (PNPClass = 'Monitor' OR Caption LIKE '%Monitor%' OR Caption LIKE '%Display%')"))
                 {
+                    searcher.Options = wmiOptions;
                     foreach (ManagementObject device in searcher.Get())
                     {
                         try
@@ -200,6 +202,7 @@ namespace SleepMngr
                 using (var searcher = new ManagementObjectSearcher("root\\WMI", 
                     "SELECT * FROM WmiMonitorID"))
                 {
+                    searcher.Options = wmiOptions;
                     foreach (var monitor in searcher.Get())
                     {
                         count++;
@@ -359,9 +362,11 @@ namespace SleepMngr
             
             try
             {
+                var nameOptions = new EnumerationOptions { Timeout = TimeSpan.FromSeconds(3) };
                 using (var searcher = new ManagementObjectSearcher("root\\WMI", 
                     "SELECT * FROM WmiMonitorID"))
                 {
+                    searcher.Options = nameOptions;
                     foreach (ManagementObject monitor in searcher.Get())
                     {
                         // Получаем UserFriendlyName

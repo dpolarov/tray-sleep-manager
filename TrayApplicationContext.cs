@@ -24,9 +24,11 @@ namespace SleepMngr
         private WorkMode currentMode = WorkMode.Auto;
         private LidActionManager lidActionManager = new LidActionManager();
         private ToolStripMenuItem statusMenuItem = null!;
+        private ToolStripMenuItem mouseWakeMenuItem = null!;
         private bool autoSleepTriggered = false;
         private bool wasClamshellMode = false;
         private DateTime? externalDisconnectedTime = null;
+        private bool isUpdatingMonitors = false;
 
         public TrayApplicationContext()
         {
@@ -105,6 +107,12 @@ namespace SleepMngr
             restoreItem.Click += OnRestoreLidSettingsClick;
             menu.Items.Add(restoreItem);
             
+            mouseWakeMenuItem = new ToolStripMenuItem("🖱️ Мышь не будит");
+            mouseWakeMenuItem.CheckOnClick = true;
+            mouseWakeMenuItem.Checked = WakeManager.IsMouseWakeDisabled;
+            mouseWakeMenuItem.Click += OnMouseWakeClick;
+            menu.Items.Add(mouseWakeMenuItem);
+            
             menu.Items.Add(new ToolStripSeparator());
             
             var sleepNowItem = new ToolStripMenuItem("💤 Заснуть сейчас");
@@ -142,6 +150,11 @@ namespace SleepMngr
             
             string stateText = PowerManager.IsPreventingSleep() ? "Защита активна" : "Сон разрешен";
             statusMenuItem.Text = $"Статус: {modeText} • {stateText}";
+            
+            if (mouseWakeMenuItem != null)
+            {
+                mouseWakeMenuItem.Checked = WakeManager.IsMouseWakeDisabled;
+            }
             
             var modeMenuItem = menu.Items[2] as ToolStripMenuItem;
             if (modeMenuItem != null)
@@ -250,22 +263,27 @@ namespace SleepMngr
         private void TriggerAutoSleep()
         {
             autoSleepTriggered = true;
-
-            // Отправляем ноутбук в спящий режим
-            bool success = PowerManager.GoToSleep();
-            
-            // Сбрасываем таймеры в любом случае
             displayOffTime = null;
-            
-            if (!success)
+
+            // Отправляем ноутбук в спящий режим в фоновом потоке чтобы не блокировать UI
+            Task.Run(() =>
             {
-                // Логируем ошибку, но не показываем пользователю
-                System.Diagnostics.Debug.WriteLine("Failed to trigger auto sleep");
-            }
+                bool success = PowerManager.GoToSleep();
+                if (!success)
+                {
+                    System.Diagnostics.Debug.WriteLine("Failed to trigger auto sleep");
+                }
+            });
         }
 
         private void UpdateMonitorStatus()
         {
+            if (isUpdatingMonitors)
+                return;
+            isUpdatingMonitors = true;
+            
+            try
+            {
             bool currentHasExternalMonitor = MonitorDetector.HasExternalMonitor();
             
             // Пока внешний монитор подключён — отслеживаем clamshell-режим
@@ -294,6 +312,11 @@ namespace SleepMngr
                 {
                     externalDisconnectedTime = DateTime.Now;
                 }
+            }
+            }
+            finally
+            {
+                isUpdatingMonitors = false;
             }
         }
 
@@ -547,6 +570,55 @@ namespace SleepMngr
             }
         }
 
+        private void OnMouseWakeClick(object? sender, EventArgs e)
+        {
+            bool shouldDisable = mouseWakeMenuItem.Checked;
+            
+            if (shouldDisable)
+            {
+                var mice = WakeManager.GetWakeArmedMouseDevices();
+                if (mice.Count == 0)
+                {
+                    MessageBox.Show(
+                        "Не найдено мышиных устройств, которые могут будить систему.\n\n" +
+                        "Возможно, мышь уже отключена от пробуждения.",
+                        "Информация",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    WakeManager.DisableMouseWake();
+                    return;
+                }
+                
+                if (WakeManager.DisableMouseWake())
+                {
+                    SystemSounds.Asterisk.Play();
+                }
+                else
+                {
+                    mouseWakeMenuItem.Checked = false;
+                    SystemSounds.Hand.Play();
+                    MessageBox.Show(
+                        "Не удалось отключить пробуждение мышью.\n" +
+                        "Попробуйте запустить программу от имени администратора.",
+                        "Ошибка",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+            }
+            else
+            {
+                if (WakeManager.EnableMouseWake())
+                {
+                    SystemSounds.Asterisk.Play();
+                }
+                else
+                {
+                    mouseWakeMenuItem.Checked = true;
+                    SystemSounds.Hand.Play();
+                }
+            }
+        }
+
         private void OnOpenLogClick(object? sender, EventArgs e)
         {
             try
@@ -688,6 +760,12 @@ namespace SleepMngr
                 // Внешнего монитора нет - восстанавливаем "Сон"
                 PowerManager.AllowSleep();
                 lidActionManager.RestoreLidAction();
+            }
+
+            // Восстанавливаем пробуждение мышью если было отключено
+            if (WakeManager.IsMouseWakeDisabled)
+            {
+                WakeManager.EnableMouseWake();
             }
 
             // Cleanup

@@ -396,7 +396,11 @@ namespace SleepMngr
                 if (process != null)
                 {
                     string output = process.StandardOutput.ReadToEnd();
-                    process.WaitForExit();
+                    if (!process.WaitForExit(5000))
+                    {
+                        try { process.Kill(); } catch { }
+                        return false;
+                    }
                     
                     // Если есть S0 Low Power Idle и нет S3 - это Modern Standby
                     bool hasS0 = output.Contains("S0") || output.Contains("Low Power Idle");
@@ -494,7 +498,11 @@ namespace SleepMngr
                 if (process != null)
                 {
                     string output = process.StandardOutput.ReadToEnd();
-                    process.WaitForExit();
+                    if (!process.WaitForExit(5000))
+                    {
+                        try { process.Kill(); } catch { }
+                        return;
+                    }
                     
                     Log("=== powercfg /requests output ===");
                     if (!string.IsNullOrWhiteSpace(output))
