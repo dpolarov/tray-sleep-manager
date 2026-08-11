@@ -114,18 +114,14 @@ dotnet build -c Release
 - **Status: [mode] • [state]** - shows current mode and state, clicking opens detailed monitor information
 - **Operating Mode** ▶
   - 🔄 **Automatic** (default) - determined by external monitor presence
-  -  **Always stay awake** - laptop does not sleep when lid is closed
-  -  **Always sleep** - laptop sleeps when lid is closed
-- **Restore lid settings** - forcibly returns settings to "Sleep"
+  - 🟠 **Always stay awake** - laptop does not sleep when lid is closed
+  - 🔷 **Always sleep** - laptop sleeps when lid is closed
+- **🔄 Restore lid settings on start** - checkbox to forcibly restore lid settings to "Sleep"
+- **🖱️ Disable mouse wake** - checkbox to disable system wake from mouse
+- **🚀 Autostart** - checkbox to enable/disable autostart on Windows startup (via registry)
 - **💤 Sleep now** - immediately puts the computer to sleep without any checks
 - **📋 Open log** - opens the log file with information about sleep attempts
 - **Exit** - closes the program and applies settings based on the current status
-
-### Autostart with Windows
-
-1. Press `Win + R`
-2. Type `shell:startup` and press Enter
-3. Create a shortcut to `SleepMngr.exe` in the opened folder
 
 ## How it works
 
@@ -263,6 +259,7 @@ For older laptops with S3 support, the program tests **10 methods**:
 
 ```
 SleepMngr/
+├── SleepMngr.sln              # Solution file
 ├── build-compact.cmd          # Compact EXE build
 ├── build-standalone.cmd       # Standalone EXE build
 ├── build-debug.cmd           # Regular build for development
@@ -273,7 +270,12 @@ SleepMngr/
 ├── MonitorDetector.cs        # Monitor detection
 ├── PowerManager.cs           # Sleep management
 ├── LidActionManager.cs       # Lid settings management
+├── WakeManager.cs            # Mouse wake management via powercfg
+├── AutoStartManager.cs       # Registry-based autostart
+├── Settings.cs               # JSON settings persistence
 ├── IconGenerator.cs          # Colored icon generation
 ├── WorkMode.cs              # Operating modes Enum
-└── README.md                # Documentation
+├── README.md                # Documentation (Russian)
+├── README.en.md             # Documentation (English)
+└── SleepMngr.Tests/         # xUnit tests
 ```
