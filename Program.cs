@@ -38,7 +38,19 @@ namespace SleepMngr
 
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
-                Application.Run(new TrayApplicationContext());
+
+                // Register before TrayApplicationContext subscribes to the same
+                // Windows event, so the WMI cache is invalidated before the UI
+                // immediately re-checks the monitor state.
+                MonitorDetector.StartWatchingDisplayChanges();
+                try
+                {
+                    Application.Run(new TrayApplicationContext());
+                }
+                finally
+                {
+                    MonitorDetector.StopWatchingDisplayChanges();
+                }
             }
             finally
             {
