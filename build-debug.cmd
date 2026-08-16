@@ -6,7 +6,7 @@ echo EXE + DLL файлы
 echo ========================================
 echo.
 
-dotnet build -c Release
+dotnet build SleepMngr.csproj -c Release
 
 if %ERRORLEVEL% EQU 0 (
     echo.

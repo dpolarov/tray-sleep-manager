@@ -1,157 +1,205 @@
 using System;
-using System.Diagnostics;
+using System.Collections.Generic;
 using System.Text.RegularExpressions;
 
 namespace SleepMngr
 {
     public class LidActionManager
     {
-        private string? originalLidActionAC = null;
-        private string? originalLidActionDC = null;
-        private bool isModified = false;
-        private bool originalsSaved = false;
+        private readonly Func<string, PowerCfgResult> runPowerCfg;
+        private string? originalLidActionAC;
+        private string? originalLidActionDC;
+        private bool isModified;
+        private bool originalsSaved;
+
+        public LidActionManager() : this(PowerCfgRunner.Run)
+        {
+        }
+
+        internal LidActionManager(Func<string, PowerCfgResult> powerCfgRunner)
+        {
+            runPowerCfg = powerCfgRunner;
+        }
+
+        public string? LastError { get; private set; }
 
         public bool SetLidActionDoNothing()
         {
-            try
+            LastError = null;
+
+            if (!EnsureOriginalsSaved())
+                return false;
+
+            if (ApplyLidActions("0", "0", out string applyError))
             {
-                // Сохраняем оригинальные настройки только один раз
-                if (!originalsSaved)
-                {
-                    originalLidActionAC = GetCurrentLidAction(true);
-                    originalLidActionDC = GetCurrentLidAction(false);
-                    originalsSaved = true;
-                }
-
-                // Устанавливаем "Ничего не делать" (0) при закрытии крышки
-                // Для питания от сети (AC)
-                RunPowerCfg("/setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0");
-                // Для питания от батареи (DC)
-                RunPowerCfg("/setdcvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0");
-                // Применяем изменения
-                RunPowerCfg("/setactive SCHEME_CURRENT");
-
                 isModified = true;
                 return true;
             }
-            catch
-            {
-                return false;
-            }
+
+            // A command may have changed only AC or DC before another command failed.
+            // Restore the saved settings best-effort so lack of elevation cannot leave
+            // an unnoticed partial configuration behind.
+            bool rollbackOk = ApplyLidActions(
+                originalLidActionAC!,
+                originalLidActionDC!,
+                out string rollbackError);
+
+            isModified = !rollbackOk;
+            string message = $"Could not set lid action to Do nothing: {applyError}";
+            if (!rollbackOk)
+                message += $" | Rollback also failed: {rollbackError}";
+
+            SetLastError(message);
+            return false;
         }
 
         public bool RestoreLidAction()
         {
-            if (!isModified)
-                return true; // Ничего не было изменено
+            LastError = null;
 
-            if (originalLidActionAC == null || originalLidActionDC == null)
+            if (!isModified)
+                return true;
+
+            if (!originalsSaved || originalLidActionAC == null || originalLidActionDC == null)
             {
-                // Если не удалось сохранить оригинальные настройки, 
-                // устанавливаем "Сон" (1) как безопасное значение по умолчанию
-                originalLidActionAC = "1";
-                originalLidActionDC = "1";
+                SetLastError("Original lid settings are unavailable; refusing to guess a restore value");
+                return false;
+            }
+
+            if (!ApplyLidActions(originalLidActionAC, originalLidActionDC, out string error))
+            {
+                SetLastError($"Could not restore original lid settings: {error}");
+                return false;
+            }
+
+            isModified = false;
+            return true;
+        }
+
+        private bool EnsureOriginalsSaved()
+        {
+            if (originalsSaved)
+                return true;
+
+            if (!TryGetCurrentLidActions(out string ac, out string dc, out string error))
+            {
+                SetLastError($"Could not read original lid settings: {error}");
+                return false;
+            }
+
+            originalLidActionAC = ac;
+            originalLidActionDC = dc;
+            originalsSaved = true;
+            AppLog.Write("LidActionManager", $"Saved original lid settings: AC={ac}, DC={dc}");
+            return true;
+        }
+
+        private bool ApplyLidActions(string acValue, string dcValue, out string error)
+        {
+            var failures = new List<string>();
+
+            var acResult = runPowerCfg($"/setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION {acValue}");
+            if (!acResult.Success)
+                failures.Add($"AC: {acResult.DescribeFailure()}");
+
+            var dcResult = runPowerCfg($"/setdcvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION {dcValue}");
+            if (!dcResult.Success)
+                failures.Add($"DC: {dcResult.DescribeFailure()}");
+
+            var activateResult = runPowerCfg("/setactive SCHEME_CURRENT");
+            if (!activateResult.Success)
+                failures.Add($"activate: {activateResult.DescribeFailure()}");
+
+            if (failures.Count > 0)
+            {
+                error = string.Join(" | ", failures);
+                return false;
+            }
+
+            if (!TryGetCurrentLidActions(out string actualAc, out string actualDc, out string queryError))
+            {
+                error = $"commands returned success but verification failed: {queryError}";
+                return false;
+            }
+
+            if (actualAc != acValue || actualDc != dcValue)
+            {
+                error = $"verification mismatch: expected AC={acValue}, DC={dcValue}; actual AC={actualAc}, DC={actualDc}";
+                return false;
+            }
+
+            error = string.Empty;
+            return true;
+        }
+
+        private bool TryGetCurrentLidActions(out string acValue, out string dcValue, out string error)
+        {
+            // Prefer the native PowrProf API. It returns numeric indexes directly and
+            // is independent of the Windows display language and console encoding.
+            if (LidPowerSettings.TryReadCurrent(out acValue, out dcValue, out string nativeError))
+            {
+                error = string.Empty;
+                return true;
+            }
+
+            // Keep powercfg parsing only as a compatibility fallback. Some unusual
+            // systems may reject the PowrProf read even though powercfg can query it.
+            acValue = string.Empty;
+            dcValue = string.Empty;
+            var result = runPowerCfg("/query SCHEME_CURRENT SUB_BUTTONS LIDACTION");
+            if (!result.Success)
+            {
+                error = $"PowrProf: {nativeError}; powercfg: {result.DescribeFailure()}";
+                return false;
+            }
+
+            MatchCollection matches = Regex.Matches(result.Output, @"0x([0-9a-fA-F]+)");
+            if (matches.Count < 2)
+            {
+                error = $"PowrProf: {nativeError}; powercfg fallback could not find AC/DC setting indexes";
+                return false;
             }
 
             try
             {
-                // Восстанавливаем оригинальные настройки
-                RunPowerCfg($"/setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION {originalLidActionAC}");
-                RunPowerCfg($"/setdcvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION {originalLidActionDC}");
-                RunPowerCfg("/setactive SCHEME_CURRENT");
-
-                isModified = false;
+                int ac = Convert.ToInt32(matches[matches.Count - 2].Groups[1].Value, 16);
+                int dc = Convert.ToInt32(matches[matches.Count - 1].Groups[1].Value, 16);
+                acValue = ac.ToString();
+                dcValue = dc.ToString();
+                error = string.Empty;
+                AppLog.Write("LidActionManager", $"PowrProf read failed; used powercfg fallback: {nativeError}");
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                error = $"PowrProf: {nativeError}; powercfg fallback parse failed: {ex.Message}";
                 return false;
             }
         }
 
-        private string? GetCurrentLidAction(bool isAC)
+        private void SetLastError(string message)
         {
-            try
-            {
-                string output = RunPowerCfg("/query SCHEME_CURRENT SUB_BUTTONS LIDACTION");
-                
-                // Ищем текущее значение в выводе
-                string pattern = isAC 
-                    ? @"Current AC Power Setting Index:\s*(0x[0-9a-fA-F]+)" 
-                    : @"Current DC Power Setting Index:\s*(0x[0-9a-fA-F]+)";
-                
-                var match = Regex.Match(output, pattern, RegexOptions.Multiline);
-                if (match.Success)
-                {
-                    // Конвертируем hex в decimal
-                    string hexValue = match.Groups[1].Value;
-                    int decimalValue = Convert.ToInt32(hexValue, 16);
-                    return decimalValue.ToString();
-                }
-                
-                // Пробуем альтернативный паттерн (без 0x)
-                pattern = isAC 
-                    ? @"Current AC Power Setting Index:\s*([0-9]+)" 
-                    : @"Current DC Power Setting Index:\s*([0-9]+)";
-                
-                match = Regex.Match(output, pattern, RegexOptions.Multiline);
-                if (match.Success)
-                {
-                    return match.Groups[1].Value;
-                }
-            }
-            catch { }
-            
-            // Возвращаем "1" (сон) как безопасное значение по умолчанию
-            return "1";
-        }
-
-        private string RunPowerCfg(string arguments)
-        {
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = "powercfg.exe",
-                Arguments = arguments,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-
-            using (var process = Process.Start(startInfo))
-            {
-                if (process == null)
-                    return string.Empty;
-
-                string output = process.StandardOutput.ReadToEnd();
-                if (!process.WaitForExit(5000))
-                {
-                    try { process.Kill(); } catch { }
-                    return output;
-                }
-                return output;
-            }
+            LastError = message;
+            AppLog.Write("LidActionManager", message);
         }
 
         public bool IsModified => isModified;
-        
+
         public bool ForceRestoreToSleep()
         {
-            try
+            LastError = null;
+
+            if (!ApplyLidActions("1", "1", out string error))
             {
-                // Принудительно устанавливаем "Сон" (1) при закрытии крышки
-                RunPowerCfg("/setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 1");
-                RunPowerCfg("/setdcvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 1");
-                RunPowerCfg("/setactive SCHEME_CURRENT");
-                
-                isModified = false;
-                originalsSaved = false;
-                return true;
-            }
-            catch
-            {
+                SetLastError($"Could not force lid action to Sleep: {error}");
                 return false;
             }
+
+            isModified = false;
+            originalsSaved = false;
+            originalLidActionAC = null;
+            originalLidActionDC = null;
+            return true;
         }
     }
 }

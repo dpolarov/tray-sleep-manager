@@ -15,6 +15,16 @@ if exist obj (
     rmdir /s /q obj
 )
 
+if exist SleepMngr.Tests\bin (
+    echo Удаление SleepMngr.Tests\bin...
+    rmdir /s /q SleepMngr.Tests\bin
+)
+
+if exist SleepMngr.Tests\obj (
+    echo Удаление SleepMngr.Tests\obj...
+    rmdir /s /q SleepMngr.Tests\obj
+)
+
 echo.
 echo ========================================
 echo ✓ Очистка завершена!

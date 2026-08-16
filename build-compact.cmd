@@ -6,7 +6,7 @@ echo Требует .NET 8.0 Runtime на целевой системе
 echo ========================================
 echo.
 
-dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true
+dotnet publish SleepMngr.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true
 
 if %ERRORLEVEL% EQU 0 (
     echo.
