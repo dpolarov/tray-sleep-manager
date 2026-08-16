@@ -2,7 +2,7 @@
 
 All notable changes to SleepMngr are documented in this file.
 
-## [Unreleased]
+## [1.0.1] - 2026-08-16
 
 ### Added
 
@@ -14,7 +14,8 @@ All notable changes to SleepMngr are documented in this file.
 
 - Reworked the main `README.md` as the English documentation.
 - Added a separate Russian `README.ru.md` with language links between both versions.
-- Updated documentation for v1.0.0 behavior, optional logging, `powercfg` diagnostics, Modern Standby, local builds, CI, and releases.
+- Updated documentation for optional logging, `powercfg` diagnostics, Modern Standby, local builds, CI, releases, and autostart.
+- Removed the redundant `README.en.md` after making English the default README.
 
 ## [1.0.0] - 2026-08-16
 
