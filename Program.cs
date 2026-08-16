@@ -40,8 +40,8 @@ namespace SleepMngr
                 Application.SetCompatibleTextRenderingDefault(false);
 
                 // Register before TrayApplicationContext subscribes to the same
-                // Windows event, so the WMI cache is invalidated before the UI
-                // immediately re-checks the monitor state.
+                // Windows event. Event handlers run in subscription order, so the
+                // WMI cache is invalidated before the tray UI re-checks monitors.
                 MonitorDetector.StartWatchingDisplayChanges();
                 try
                 {
