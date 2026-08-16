@@ -11,6 +11,9 @@ namespace SleepMngr
 {
     public class MonitorDetector
     {
+        // WMI is relatively expensive and this detector is polled every two seconds.
+        // Cache WMI-derived data briefly, but invalidate it immediately on a Windows
+        // display-settings event so plug/unplug changes do not wait for the TTL.
         private static readonly object CacheLock = new();
         private static readonly TimeSpan WmiCacheDuration = TimeSpan.FromSeconds(10);
         private static int? cachedTotalMonitorCount;
