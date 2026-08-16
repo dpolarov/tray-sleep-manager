@@ -24,7 +24,7 @@ Two Windows x64 packages are published:
 
 There is no installer. Extract the ZIP and run `SleepMngr.exe`.
 
-Current stable release: **v1.0.0**. See [CHANGELOG.md](CHANGELOG.md) for release notes.
+See [CHANGELOG.md](CHANGELOG.md) for release notes. The `main` branch may contain changes that are newer than the latest published release.
 
 ## Features
 
@@ -37,6 +37,7 @@ Current stable release: **v1.0.0**. See [CHANGELOG.md](CHANGELOG.md) for release
 - Multiple fallback sleep methods for classic S3 systems.
 - Automatic sleep after an external monitor is disconnected while the laptop is in clamshell mode.
 - Optional mouse-wake disabling.
+- **Start with Windows** option using the current user's Windows Run registry key.
 - Russian and English UI with runtime language switching.
 - Optional structured logging, **disabled by default**.
 - Detailed status window showing monitor and power-state information.
@@ -76,6 +77,7 @@ The current tray menu contains:
   - `Always allow sleep`
 - **Restore lid settings** — manually restores the saved lid-close action.
 - **Mouse does not wake** — disables/enables mouse wake through `powercfg`.
+- **Start with Windows** — enables/disables autostart for the current Windows user.
 - **Language** — switches between English and Russian immediately.
 - **Enable logging** — turns diagnostic file logging on/off.
 - **Sleep now** — immediately requests system sleep.
@@ -84,11 +86,27 @@ The current tray menu contains:
 
 Double-clicking the tray icon opens the status window.
 
+## Start with Windows
+
+The autostart option writes the current `SleepMngr.exe` path to:
+
+```text
+HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
+```
+
+Value name:
+
+```text
+SleepMngr
+```
+
+Because it uses `HKEY_CURRENT_USER`, enabling or disabling autostart normally does not require administrator rights. The registry write is verified after the change. If the executable is moved to another folder later, toggle **Start with Windows** off and on again so the saved path is updated.
+
 ## Logging
 
 Logging is **off by default** and the choice is persisted between launches.
 
-When enabled, SleepMngr records mode changes, monitor/display changes, lid operations, mouse-wake operations, `powercfg` commands and results, session/power events, `Sleep now`, and automatic sleep triggers.
+When enabled, SleepMngr records mode changes, monitor/display changes, lid operations, mouse-wake operations, autostart changes, `powercfg` commands and results, session/power events, `Sleep now`, and automatic sleep triggers.
 
 Files are stored under:
 
@@ -230,6 +248,12 @@ The workflow also creates the GitHub Release automatically.
 
 Enable logging and run **Sleep now** again. On Modern Standby systems, look for an S0 Low Power Idle detection message. On classic S3 systems, the detailed trace shows the fallback sleep attempts.
 
+### Start with Windows does not work
+
+- Toggle **Start with Windows** off and on again.
+- If the executable was moved, the toggle updates the saved path.
+- Enable logging and repeat the operation if the registry change fails.
+
 ### Local build reports duplicate assembly attributes
 
 Update to the latest `main`, then run:
@@ -252,6 +276,7 @@ PowerCfgRunner.cs           safe powercfg process execution and diagnostics
 LidActionManager.cs         lid-close changes, save/restore and verification
 LidPowerSettings.cs         native PowrProf lid setting reads
 WakeManager.cs              mouse wake management
+AutoStartManager.cs         current-user Windows autostart registration
 Localization.cs             Russian/English UI selection
 AppLog.cs                   optional diagnostic logging
 AppSelfTest.cs              CI-safe self-test
