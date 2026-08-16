@@ -6,10 +6,20 @@ namespace SleepMngr
 {
     public class LidActionManager
     {
+        private readonly Func<string, PowerCfgResult> runPowerCfg;
         private string? originalLidActionAC;
         private string? originalLidActionDC;
         private bool isModified;
         private bool originalsSaved;
+
+        public LidActionManager() : this(PowerCfgRunner.Run)
+        {
+        }
+
+        internal LidActionManager(Func<string, PowerCfgResult> powerCfgRunner)
+        {
+            runPowerCfg = powerCfgRunner;
+        }
 
         public string? LastError { get; private set; }
 
@@ -88,15 +98,15 @@ namespace SleepMngr
         {
             var failures = new List<string>();
 
-            var acResult = PowerCfgRunner.Run($"/setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION {acValue}");
+            var acResult = runPowerCfg($"/setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION {acValue}");
             if (!acResult.Success)
                 failures.Add($"AC: {acResult.DescribeFailure()}");
 
-            var dcResult = PowerCfgRunner.Run($"/setdcvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION {dcValue}");
+            var dcResult = runPowerCfg($"/setdcvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION {dcValue}");
             if (!dcResult.Success)
                 failures.Add($"DC: {dcResult.DescribeFailure()}");
 
-            var activateResult = PowerCfgRunner.Run("/setactive SCHEME_CURRENT");
+            var activateResult = runPowerCfg("/setactive SCHEME_CURRENT");
             if (!activateResult.Success)
                 failures.Add($"activate: {activateResult.DescribeFailure()}");
 
@@ -127,17 +137,17 @@ namespace SleepMngr
             acValue = string.Empty;
             dcValue = string.Empty;
 
-            var result = PowerCfgRunner.Run("/query SCHEME_CURRENT SUB_BUTTONS LIDACTION");
+            var result = runPowerCfg("/query SCHEME_CURRENT SUB_BUTTONS LIDACTION");
             if (!result.Success)
             {
                 error = result.DescribeFailure();
                 return false;
             }
 
-            // The labels in powercfg output are localized. The current AC/DC values,
-            // however, are emitted as hexadecimal 0x... values at the end of this
-            // specific setting query. Using the final two values avoids depending on
-            // English/Russian/Slovak UI text.
+            // The labels in powercfg output are localized. Microsoft documents that
+            // current setting indexes are emitted as hexadecimal 0x... values. In a
+            // setting-specific query the current AC/DC indexes are the final two hex
+            // values, so this does not depend on English/Russian/Slovak labels.
             MatchCollection matches = Regex.Matches(result.Output, @"0x([0-9a-fA-F]+)");
             if (matches.Count < 2)
             {
