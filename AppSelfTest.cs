@@ -6,6 +6,8 @@ namespace SleepMngr
     {
         public static int Run()
         {
+            bool originalLogging = AppLog.Enabled;
+
             try
             {
                 // Exercise the real non-zero exit path without changing any power setting.
@@ -38,19 +40,35 @@ namespace SleepMngr
                     return 21;
                 }
 
+                // Verify that the persisted logging switch can be changed both ways.
+                AppLog.SetEnabled(false);
+                if (AppLog.Enabled)
+                    return 30;
+
+                AppLog.SetEnabled(true);
+                if (!AppLog.Enabled)
+                    return 31;
+
+                AppLog.SetEnabled(originalLogging);
+
                 // Read-only subsystem probes: these may return empty data on a CI VM,
                 // but they must not crash the executable.
                 _ = WakeManager.GetWakeArmedDevices();
                 _ = MonitorDetector.GetMonitorCount();
                 _ = Localization.T("Тест", "Test");
 
-                AppLog.Write("SelfTest", "PASS: powercfg failure path is non-fatal");
+                AppLog.Write("SelfTest", "PASS: powercfg failure path and logging toggle are non-fatal");
                 return 0;
             }
             catch (Exception ex)
             {
                 AppLog.Write("SelfTest", $"FAIL: unhandled exception: {ex}");
                 return 99;
+            }
+            finally
+            {
+                if (AppLog.Enabled != originalLogging)
+                    AppLog.SetEnabled(originalLogging);
             }
         }
     }
