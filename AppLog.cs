@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 
 namespace SleepMngr
 {
@@ -15,6 +16,11 @@ namespace SleepMngr
 
         private static bool enabled = LoadEnabled();
 
+        static AppLog()
+        {
+            ConfigureLegacyPowerManagerLog(enabled);
+        }
+
         public static bool Enabled => enabled;
         public static string FilePath => LogFile;
 
@@ -23,13 +29,14 @@ namespace SleepMngr
             if (enabled == value)
                 return;
 
-            // Record the transition itself when disabling. When enabling, persist the
-            // setting first and then write the first line into the newly enabled log.
+            // Record the transition itself when disabling. When enabling, switch all
+            // writers to the real file first and then record the first enabled line.
             if (!value)
                 Write("Logging", "Logging disabled");
 
             enabled = value;
             SaveEnabled(value);
+            ConfigureLegacyPowerManagerLog(value);
 
             if (value)
                 Write("Logging", "Logging enabled");
@@ -82,6 +89,25 @@ namespace SleepMngr
             catch
             {
                 // A settings write failure must not affect application behavior.
+            }
+        }
+
+        private static void ConfigureLegacyPowerManagerLog(bool value)
+        {
+            try
+            {
+                // PowerManager predates AppLog and still owns a private direct file
+                // writer for the detailed sleep trace. Route it to the Windows null
+                // device while logging is disabled so the global toggle is complete.
+                FieldInfo? field = typeof(PowerManager).GetField(
+                    "logFile",
+                    BindingFlags.Static | BindingFlags.NonPublic);
+
+                field?.SetValue(null, value ? LogFile : "NUL");
+            }
+            catch
+            {
+                // Logging configuration must never affect sleep functionality.
             }
         }
     }
