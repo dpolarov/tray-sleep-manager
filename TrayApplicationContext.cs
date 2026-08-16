@@ -26,6 +26,7 @@ namespace SleepMngr
         private WorkMode currentMode = WorkMode.Auto;
         private ToolStripMenuItem statusMenuItem = null!;
         private ToolStripMenuItem mouseWakeMenuItem = null!;
+        private ToolStripMenuItem autoStartMenuItem = null!;
         private ToolStripMenuItem loggingMenuItem = null!;
         private bool autoSleepTriggered;
         private bool wasClamshellMode;
@@ -110,6 +111,14 @@ namespace SleepMngr
             mouseWakeMenuItem.Click += OnMouseWakeClick;
             menu.Items.Add(mouseWakeMenuItem);
 
+            autoStartMenuItem = new ToolStripMenuItem(T("🚀 Автозапуск", "🚀 Start with Windows"))
+            {
+                CheckOnClick = true,
+                Checked = AutoStartManager.IsEnabled
+            };
+            autoStartMenuItem.Click += OnAutoStartClick;
+            menu.Items.Add(autoStartMenuItem);
+
             var languageItem = new ToolStripMenuItem(T("🌐 Язык", "🌐 Language"));
             var russianItem = new ToolStripMenuItem("Русский")
             {
@@ -177,6 +186,28 @@ namespace SleepMngr
             AppLog.SetEnabled(loggingMenuItem.Checked);
         }
 
+        private void OnAutoStartClick(object? sender, EventArgs e)
+        {
+            bool enable = autoStartMenuItem.Checked;
+            AppLog.Write("UI", $"Command: autostart -> {(enable ? "enable" : "disable")}");
+
+            if (AutoStartManager.SetEnabled(enable))
+            {
+                SystemSounds.Asterisk.Play();
+                return;
+            }
+
+            autoStartMenuItem.Checked = !enable;
+            SystemSounds.Hand.Play();
+            MessageBox.Show(
+                T(
+                    $"Не удалось {(enable ? "включить" : "выключить")} автозапуск.\n\nОшибка: {AutoStartManager.LastError}",
+                    $"Could not {(enable ? "enable" : "disable")} autostart.\n\nError: {AutoStartManager.LastError}"),
+                T("Ошибка", "Error"),
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+
         private void UpdateMenuCheckmarks(ContextMenuStrip menu)
         {
             string modeText = currentMode switch
@@ -192,6 +223,7 @@ namespace SleepMngr
                 : T("Сон разрешен", "Sleep allowed");
             statusMenuItem.Text = $"{T("Статус", "Status")}: {modeText} • {stateText}";
             mouseWakeMenuItem.Checked = WakeManager.IsMouseWakeDisabled;
+            autoStartMenuItem.Checked = AutoStartManager.IsEnabled;
             loggingMenuItem.Checked = AppLog.Enabled;
 
             if (menu.Items.Count > 2 && menu.Items[2] is ToolStripMenuItem modeMenuItem)
@@ -759,6 +791,7 @@ namespace SleepMngr
 
             sb.AppendLine($"{T("Предотвращение сна", "Sleep prevention")}: {(preventing ? T("Активно ✓", "Active ✓") : T("Неактивно ✗", "Inactive ✗"))}");
             sb.AppendLine($"{T("Настройки крышки", "Lid settings")}: {(lidSettingsModified ? T("Ничего не делать", "Do nothing") : T("Сон", "Sleep"))}");
+            sb.AppendLine($"{T("Автозапуск", "Start with Windows")}: {(AutoStartManager.IsEnabled ? T("Включен ✓", "Enabled ✓") : T("Выключен ✗", "Disabled ✗"))}");
             sb.AppendLine($"{T("Логирование", "Logging")}: {(AppLog.Enabled ? T("Включено ✓", "Enabled ✓") : T("Выключено ✗", "Disabled ✗"))}");
             sb.AppendLine();
             sb.AppendLine(T("Логика работы:", "How it works:"));
