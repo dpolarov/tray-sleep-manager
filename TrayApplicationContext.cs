@@ -1,191 +1,199 @@
 using System;
 using System.Drawing;
+using System.Media;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using System.Media;
 using Microsoft.Win32;
 
 namespace SleepMngr
 {
     public class TrayApplicationContext : ApplicationContext
     {
-        private NotifyIcon trayIcon;
-        private Timer monitorCheckTimer;
-        private Timer autoSleepTimer;
-        private bool hasExternalMonitor = false;
-        private bool wasLidClosed = false;
-        private bool isDisplayOff = false;
-        private bool isLidClosed = false;
-        private DateTime? displayOffTime = null;
-        private Icon blueIcon;
-        private Icon yellowIcon;
-        private Icon darkBlueIcon;
-        private Icon darkYellowIcon;
+        private readonly NotifyIcon trayIcon;
+        private readonly Timer monitorCheckTimer;
+        private readonly Timer autoSleepTimer;
+        private readonly Icon blueIcon;
+        private readonly Icon yellowIcon;
+        private readonly Icon darkBlueIcon;
+        private readonly Icon darkYellowIcon;
+        private readonly LidActionManager lidActionManager = new LidActionManager();
+
+        private bool hasExternalMonitor;
+        private bool wasLidClosed;
+        private bool isDisplayOff;
+        private bool isLidClosed;
+        private DateTime? displayOffTime;
         private WorkMode currentMode = WorkMode.Auto;
-        private LidActionManager lidActionManager = new LidActionManager();
         private ToolStripMenuItem statusMenuItem = null!;
         private ToolStripMenuItem mouseWakeMenuItem = null!;
-        private bool autoSleepTriggered = false;
-        private bool wasClamshellMode = false;
-        private DateTime? externalDisconnectedTime = null;
-        private bool isUpdatingMonitors = false;
+        private bool autoSleepTriggered;
+        private bool wasClamshellMode;
+        private DateTime? externalDisconnectedTime;
+        private bool isUpdatingMonitors;
+        private bool isExiting;
 
         public TrayApplicationContext()
         {
-            // Create colored icons
-            blueIcon = IconGenerator.CreateBlueIcon();           // Авто + засыпать
-            yellowIcon = IconGenerator.CreateYellowIcon();       // Авто + не засыпать
-            darkBlueIcon = IconGenerator.CreateDarkBlueIcon();   // Ручной засыпать
-            darkYellowIcon = IconGenerator.CreateDarkYellowIcon(); // Ручной не засыпать
+            blueIcon = IconGenerator.CreateBlueIcon();
+            yellowIcon = IconGenerator.CreateYellowIcon();
+            darkBlueIcon = IconGenerator.CreateDarkBlueIcon();
+            darkYellowIcon = IconGenerator.CreateDarkYellowIcon();
 
-            // Initialize tray icon
-            trayIcon = new NotifyIcon()
+            trayIcon = new NotifyIcon
             {
                 Icon = blueIcon,
-                ContextMenuStrip = CreateContextMenu(),
                 Visible = true,
                 Text = "SleepMngr"
             };
-
+            trayIcon.ContextMenuStrip = CreateContextMenu();
             trayIcon.DoubleClick += OnTrayIconDoubleClick;
 
-            // Initialize timer to check monitor status
-            monitorCheckTimer = new Timer();
-            monitorCheckTimer.Interval = 2000; // Check every 2 seconds
+            monitorCheckTimer = new Timer { Interval = 2000 };
             monitorCheckTimer.Tick += OnMonitorCheckTimerTick;
             monitorCheckTimer.Start();
 
-            // Initialize timer for auto-sleep functionality
-            autoSleepTimer = new Timer();
-            autoSleepTimer.Interval = 1000; // Check every 1 second
+            autoSleepTimer = new Timer { Interval = 1000 };
             autoSleepTimer.Tick += OnAutoSleepTimerTick;
             autoSleepTimer.Start();
 
-            // Subscribe to system events
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
             SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
             SystemEvents.SessionSwitch += OnSessionSwitch;
 
-            // Initial check - сразу проверяем мониторы и применяем настройки
             hasExternalMonitor = MonitorDetector.HasExternalMonitor();
             CheckLidState();
             UpdateDisplayState();
             UpdatePowerState();
         }
 
+        private static string T(string russian, string english) => Localization.T(russian, english);
+
         private ContextMenuStrip CreateContextMenu()
         {
             var menu = new ContextMenuStrip();
-            
-            statusMenuItem = new ToolStripMenuItem("Статус");
+
+            statusMenuItem = new ToolStripMenuItem(T("Статус", "Status"));
             statusMenuItem.Click += OnStatusClick;
             menu.Items.Add(statusMenuItem);
-            
             menu.Items.Add(new ToolStripSeparator());
-            
-            // Mode submenu
-            var modeItem = new ToolStripMenuItem("Режим работы");
-            
-            var autoModeItem = new ToolStripMenuItem("🔄 Автоматически");
-            autoModeItem.Click += (s, e) => SetMode(WorkMode.Auto);
-            autoModeItem.Checked = true;
+
+            var modeItem = new ToolStripMenuItem(T("Режим работы", "Operating mode"));
+            var autoModeItem = new ToolStripMenuItem(T("🔄 Автоматически", "🔄 Automatic"));
+            autoModeItem.Click += (_, _) => SetMode(WorkMode.Auto);
             modeItem.DropDownItems.Add(autoModeItem);
-            
-            var alwaysPreventItem = new ToolStripMenuItem("🟠 Всегда не засыпать");
-            alwaysPreventItem.Click += (s, e) => SetMode(WorkMode.AlwaysPrevent);
+
+            var alwaysPreventItem = new ToolStripMenuItem(T("🟠 Всегда не засыпать", "🟠 Always prevent sleep"));
+            alwaysPreventItem.Click += (_, _) => SetMode(WorkMode.AlwaysPrevent);
             modeItem.DropDownItems.Add(alwaysPreventItem);
-            
-            var alwaysAllowItem = new ToolStripMenuItem("🔷 Всегда засыпать");
-            alwaysAllowItem.Click += (s, e) => SetMode(WorkMode.AlwaysAllow);
+
+            var alwaysAllowItem = new ToolStripMenuItem(T("🔷 Всегда засыпать", "🔷 Always allow sleep"));
+            alwaysAllowItem.Click += (_, _) => SetMode(WorkMode.AlwaysAllow);
             modeItem.DropDownItems.Add(alwaysAllowItem);
-            
             menu.Items.Add(modeItem);
-            
+
             menu.Items.Add(new ToolStripSeparator());
-            
-            var restoreItem = new ToolStripMenuItem("Восстановить настройки крышки");
+
+            var restoreItem = new ToolStripMenuItem(T("Восстановить настройки крышки", "Restore lid settings"));
             restoreItem.Click += OnRestoreLidSettingsClick;
             menu.Items.Add(restoreItem);
-            
-            mouseWakeMenuItem = new ToolStripMenuItem("🖱️ Мышь не будит");
-            mouseWakeMenuItem.CheckOnClick = true;
-            mouseWakeMenuItem.Checked = WakeManager.IsMouseWakeDisabled;
+
+            mouseWakeMenuItem = new ToolStripMenuItem(T("🖱️ Мышь не будит", "🖱️ Mouse does not wake"))
+            {
+                CheckOnClick = true,
+                Checked = WakeManager.IsMouseWakeDisabled
+            };
             mouseWakeMenuItem.Click += OnMouseWakeClick;
             menu.Items.Add(mouseWakeMenuItem);
-            
+
+            var languageItem = new ToolStripMenuItem(T("🌐 Язык", "🌐 Language"));
+            var russianItem = new ToolStripMenuItem("Русский")
+            {
+                Checked = Localization.CurrentLanguage == AppLanguage.Russian
+            };
+            russianItem.Click += (_, _) => SetLanguage(AppLanguage.Russian);
+            languageItem.DropDownItems.Add(russianItem);
+
+            var englishItem = new ToolStripMenuItem("English")
+            {
+                Checked = Localization.CurrentLanguage == AppLanguage.English
+            };
+            englishItem.Click += (_, _) => SetLanguage(AppLanguage.English);
+            languageItem.DropDownItems.Add(englishItem);
+            menu.Items.Add(languageItem);
+
             menu.Items.Add(new ToolStripSeparator());
-            
-            var sleepNowItem = new ToolStripMenuItem("💤 Заснуть сейчас");
+
+            var sleepNowItem = new ToolStripMenuItem(T("💤 Заснуть сейчас", "💤 Sleep now"));
             sleepNowItem.Click += OnSleepNowClick;
             menu.Items.Add(sleepNowItem);
-            
+
             menu.Items.Add(new ToolStripSeparator());
-            
-            var openLogItem = new ToolStripMenuItem("📋 Открыть лог");
+
+            var openLogItem = new ToolStripMenuItem(T("📋 Открыть лог", "📋 Open log"));
             openLogItem.Click += OnOpenLogClick;
             menu.Items.Add(openLogItem);
-            
+
             menu.Items.Add(new ToolStripSeparator());
-            
-            var exitItem = new ToolStripMenuItem("Выход");
+
+            var exitItem = new ToolStripMenuItem(T("Выход", "Exit"));
             exitItem.Click += OnExitClick;
             menu.Items.Add(exitItem);
 
-            // Update checkmarks when menu opens
-            menu.Opening += (s, e) => UpdateMenuCheckmarks(menu);
-
+            menu.Opening += (_, _) => UpdateMenuCheckmarks(menu);
+            UpdateMenuCheckmarks(menu);
             return menu;
         }
-        
+
+        private void SetLanguage(AppLanguage language)
+        {
+            if (Localization.CurrentLanguage == language)
+                return;
+
+            Localization.SetLanguage(language);
+            var previousMenu = trayIcon.ContextMenuStrip;
+            trayIcon.ContextMenuStrip = CreateContextMenu();
+            previousMenu?.Dispose();
+            UpdatePowerState();
+        }
+
         private void UpdateMenuCheckmarks(ContextMenuStrip menu)
         {
-            // Обновляем текст статуса с текущим режимом и состоянием
             string modeText = currentMode switch
             {
-                WorkMode.Auto => "🔄 Авто",
-                WorkMode.AlwaysPrevent => "🟠 Не засыпать",
-                WorkMode.AlwaysAllow => "🔷 Засыпать",
+                WorkMode.Auto => T("🔄 Авто", "🔄 Auto"),
+                WorkMode.AlwaysPrevent => T("🟠 Не засыпать", "🟠 Prevent sleep"),
+                WorkMode.AlwaysAllow => T("🔷 Засыпать", "🔷 Allow sleep"),
                 _ => "?"
             };
-            
-            string stateText = PowerManager.IsPreventingSleep() ? "Защита активна" : "Сон разрешен";
-            statusMenuItem.Text = $"Статус: {modeText} • {stateText}";
-            
-            if (mouseWakeMenuItem != null)
-            {
-                mouseWakeMenuItem.Checked = WakeManager.IsMouseWakeDisabled;
-            }
-            
-            var modeMenuItem = menu.Items[2] as ToolStripMenuItem;
-            if (modeMenuItem != null)
+
+            string stateText = PowerManager.IsPreventingSleep()
+                ? T("Защита активна", "Protection active")
+                : T("Сон разрешен", "Sleep allowed");
+            statusMenuItem.Text = $"{T("Статус", "Status")}: {modeText} • {stateText}";
+            mouseWakeMenuItem.Checked = WakeManager.IsMouseWakeDisabled;
+
+            if (menu.Items.Count > 2 && menu.Items[2] is ToolStripMenuItem modeMenuItem)
             {
                 foreach (ToolStripMenuItem item in modeMenuItem.DropDownItems)
-                {
                     item.Checked = false;
-                }
-                
+
                 int checkedIndex = (int)currentMode;
                 if (checkedIndex >= 0 && checkedIndex < modeMenuItem.DropDownItems.Count)
-                {
                     ((ToolStripMenuItem)modeMenuItem.DropDownItems[checkedIndex]).Checked = true;
-                }
             }
         }
-        
+
         private void SetMode(WorkMode mode)
         {
-            if (currentMode != mode)
-            {
-                currentMode = mode;
-                
-                // При переключении в автоматический режим - принудительно применяем настройки
-                if (mode == WorkMode.Auto)
-                {
-                    hasExternalMonitor = MonitorDetector.HasExternalMonitor();
-                }
-                
-                UpdatePowerState();
-            }
+            if (currentMode == mode)
+                return;
+
+            currentMode = mode;
+            if (mode == WorkMode.Auto)
+                hasExternalMonitor = MonitorDetector.HasExternalMonitor();
+
+            UpdatePowerState();
         }
 
         private void OnMonitorCheckTimerTick(object? sender, EventArgs e)
@@ -197,38 +205,21 @@ namespace SleepMngr
 
         private void OnAutoSleepTimerTick(object? sender, EventArgs e)
         {
-            // Проверяем условия для автоматического сна
-            // Только в автоматическом режиме
-            if (currentMode != WorkMode.Auto)
+            if (currentMode != WorkMode.Auto || autoSleepTriggered)
                 return;
 
-            // Если сон уже был запрошен - не повторяем
-            if (autoSleepTriggered)
-                return;
-
-            // Условие 1: крышка закрыта И дисплей выключен
-            if (isLidClosed && isDisplayOff && displayOffTime.HasValue)
+            if (isLidClosed && isDisplayOff && displayOffTime.HasValue &&
+                (DateTime.Now - displayOffTime.Value).TotalSeconds >= 10)
             {
-                TimeSpan elapsed = DateTime.Now - displayOffTime.Value;
-                
-                if (elapsed.TotalSeconds >= 10)
-                {
-                    TriggerAutoSleep();
-                    return;
-                }
+                TriggerAutoSleep();
+                return;
             }
-            
-            // Условие 2: внешний монитор был отключён в clamshell-режиме
-            // Ждём 3 секунды после отключения и принудительно засыпаем
-            if (externalDisconnectedTime.HasValue && !hasExternalMonitor)
+
+            if (externalDisconnectedTime.HasValue && !hasExternalMonitor &&
+                (DateTime.Now - externalDisconnectedTime.Value).TotalSeconds >= 3)
             {
-                TimeSpan elapsed = DateTime.Now - externalDisconnectedTime.Value;
-                if (elapsed.TotalSeconds >= 3)
-                {
-                    externalDisconnectedTime = null;
-                    TriggerAutoSleep();
-                    return;
-                }
+                externalDisconnectedTime = null;
+                TriggerAutoSleep();
             }
         }
 
@@ -236,43 +227,28 @@ namespace SleepMngr
         {
             try
             {
-                // Проверяем количество активных мониторов
-                int activeMonitors = MonitorDetector.GetMonitorCount();
-                bool currentDisplayOff = (activeMonitors == 0);
+                bool currentDisplayOff = MonitorDetector.GetMonitorCount() == 0;
+                if (currentDisplayOff == isDisplayOff)
+                    return;
 
-                // Если состояние изменилось
-                if (currentDisplayOff != isDisplayOff)
-                {
-                    isDisplayOff = currentDisplayOff;
-                    
-                    if (isDisplayOff)
-                    {
-                        // Дисплей только что выключился - запоминаем время
-                        displayOffTime = DateTime.Now;
-                    }
-                    else
-                    {
-                        // Дисплей включился - сбрасываем таймер
-                        displayOffTime = null;
-                    }
-                }
+                isDisplayOff = currentDisplayOff;
+                displayOffTime = isDisplayOff ? DateTime.Now : null;
             }
             catch { }
         }
 
         private void TriggerAutoSleep()
         {
+            if (autoSleepTriggered)
+                return;
+
             autoSleepTriggered = true;
             displayOffTime = null;
 
-            // Отправляем ноутбук в спящий режим в фоновом потоке чтобы не блокировать UI
-            Task.Run(() =>
+            _ = Task.Run(() =>
             {
-                bool success = PowerManager.GoToSleep();
-                if (!success)
-                {
+                if (!PowerManager.GoToSleep())
                     System.Diagnostics.Debug.WriteLine("Failed to trigger auto sleep");
-                }
             });
         }
 
@@ -280,39 +256,30 @@ namespace SleepMngr
         {
             if (isUpdatingMonitors)
                 return;
+
             isUpdatingMonitors = true;
-            
             try
             {
-            bool currentHasExternalMonitor = MonitorDetector.HasExternalMonitor();
-            
-            // Пока внешний монитор подключён — отслеживаем clamshell-режим
-            // Если 1 активный дисплей при подключённом внешнем = крышка закрыта (clamshell)
-            if (currentHasExternalMonitor)
-            {
-                int activeCount = MonitorDetector.GetMonitorCount();
-                wasClamshellMode = (activeCount <= 1);
-            }
-            
-            if (currentHasExternalMonitor != hasExternalMonitor)
-            {
+                bool currentHasExternalMonitor = MonitorDetector.HasExternalMonitor();
+
+                if (currentHasExternalMonitor)
+                    wasClamshellMode = MonitorDetector.GetMonitorCount() <= 1;
+
+                if (currentHasExternalMonitor == hasExternalMonitor)
+                    return;
+
                 bool wasExternal = hasExternalMonitor;
                 hasExternalMonitor = currentHasExternalMonitor;
                 UpdatePowerState();
-                
-                // Монитор подключён обратно — сбрасываем флаги
+
                 if (currentHasExternalMonitor)
                 {
                     autoSleepTriggered = false;
                     externalDisconnectedTime = null;
                 }
-                
-                // Внешний монитор отключён — если были в clamshell, запускаем таймер на сон
+
                 if (wasExternal && !currentHasExternalMonitor && currentMode == WorkMode.Auto && wasClamshellMode)
-                {
                     externalDisconnectedTime = DateTime.Now;
-                }
-            }
             }
             finally
             {
@@ -322,48 +289,47 @@ namespace SleepMngr
 
         private void UpdatePowerState()
         {
-            bool shouldPreventSleep = false;
-            string modeText = "";
+            bool shouldPreventSleep;
+            string modeText;
             Icon selectedIcon;
-            
+
             switch (currentMode)
             {
                 case WorkMode.Auto:
                     shouldPreventSleep = hasExternalMonitor;
                     if (shouldPreventSleep)
                     {
-                        modeText = $"Авто - Активен ({MonitorDetector.GetMonitorCount()} монитора)";
-                        selectedIcon = yellowIcon; // 🟡 Желтая - авто + не засыпать
+                        int count = MonitorDetector.GetMonitorCount();
+                        modeText = T($"Авто - Активен ({count} монитора)", $"Auto - Active ({count} monitor(s))");
+                        selectedIcon = yellowIcon;
                     }
                     else
                     {
-                        modeText = "Авто - Неактивен";
-                        selectedIcon = blueIcon; // 🔵 Синяя - авто + засыпать
+                        modeText = T("Авто - Неактивен", "Auto - Inactive");
+                        selectedIcon = blueIcon;
                     }
                     break;
-                    
+
                 case WorkMode.AlwaysPrevent:
                     shouldPreventSleep = true;
-                    modeText = "Всегда не засыпать";
-                    selectedIcon = darkYellowIcon; // 🟤 Темно-желтая - ручной не засыпать
+                    modeText = T("Всегда не засыпать", "Always prevent sleep");
+                    selectedIcon = darkYellowIcon;
                     break;
-                    
+
                 case WorkMode.AlwaysAllow:
                     shouldPreventSleep = false;
-                    modeText = "Всегда засыпать";
-                    selectedIcon = darkBlueIcon; // 🔷 Темно-синяя - ручной засыпать
+                    modeText = T("Всегда засыпать", "Always allow sleep");
+                    selectedIcon = darkBlueIcon;
                     break;
-                    
+
                 default:
                     shouldPreventSleep = false;
+                    modeText = string.Empty;
                     selectedIcon = blueIcon;
                     break;
             }
-            
-            // Запоминаем предыдущее состояние для звука
+
             bool wasPreventingSleep = PowerManager.IsPreventingSleep();
-            
-            // Применяем настройки
             if (shouldPreventSleep)
             {
                 PowerManager.PreventSleep();
@@ -374,37 +340,24 @@ namespace SleepMngr
                 PowerManager.AllowSleep();
                 lidActionManager.RestoreLidAction();
             }
-            
-            // Устанавливаем иконку в соответствии с режимом
+
             trayIcon.Icon = selectedIcon;
             trayIcon.Text = $"Sleep Manager - {modeText}";
-            
-            // Воспроизводим звук при изменении состояния
+
             if (wasPreventingSleep != shouldPreventSleep)
-            {
                 PlayStatusChangeSound(shouldPreventSleep);
-            }
         }
-        
-        private void PlayStatusChangeSound(bool isProtectionActive)
+
+        private static void PlayStatusChangeSound(bool isProtectionActive)
         {
             try
             {
                 if (isProtectionActive)
-                {
-                    // Защита включена - звук "Asterisk" (информация)
                     SystemSounds.Asterisk.Play();
-                }
                 else
-                {
-                    // Защита выключена - звук "Hand" (предупреждение)
                     SystemSounds.Hand.Play();
-                }
             }
-            catch
-            {
-                // Игнорируем ошибки воспроизведения звука
-            }
+            catch { }
         }
 
         private void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
@@ -426,23 +379,33 @@ namespace SleepMngr
 
         private void OnDisplaySettingsChanged(object? sender, EventArgs e)
         {
+            if (isExiting)
+                return;
+
             UpdateMonitorStatus();
             UpdateDisplayState();
         }
 
         private void OnSessionSwitch(object sender, SessionSwitchEventArgs e)
         {
-            // Отслеживаем события сессии для определения состояния крышки
+            if (isExiting)
+                return;
+
             switch (e.Reason)
             {
                 case SessionSwitchReason.SessionLock:
-                    // Сессия заблокирована - может быть из-за закрытия крышки
-                    // Дополнительно проверяем через задержку
-                    Task.Delay(500).ContinueWith(_ => CheckLidState());
+                    var timer = new Timer { Interval = 500 };
+                    timer.Tick += (_, _) =>
+                    {
+                        timer.Stop();
+                        timer.Dispose();
+                        if (!isExiting)
+                            CheckLidState();
+                    };
+                    timer.Start();
                     break;
-                    
+
                 case SessionSwitchReason.SessionUnlock:
-                    // Сессия разблокирована - крышка открыта
                     isLidClosed = false;
                     displayOffTime = null;
                     autoSleepTriggered = false;
@@ -454,57 +417,31 @@ namespace SleepMngr
         {
             try
             {
-                // Проверяем количество мониторов
                 int monitorCount = MonitorDetector.GetMonitorCount();
                 int attachedCount = MonitorDetector.GetAttachedDisplayCount();
-                
-                // Случай 1: Нет активных мониторов вообще - крышка закрыта и дисплей выключен
+
                 if (monitorCount == 0)
-                {
                     isLidClosed = true;
-                }
-                // Случай 2: Есть внешние мониторы (физически подключено >= 2)
-                // но активен только 1 - вероятно крышка закрыта
                 else if (attachedCount >= 2 && monitorCount == 1)
-                {
                     isLidClosed = true;
-                }
-                // Случай 3: Один монитор и нет внешнего - встроенный активен, крышка открыта
                 else if (monitorCount == 1 && attachedCount == 1)
-                {
                     isLidClosed = false;
-                }
-                // Случай 4: Несколько активных мониторов - работаем с открытой или закрытой крышкой
-                // Не можем точно определить, считаем что крышка может быть закрыта
                 else if (monitorCount > 1)
-                {
-                    // Если было 2+ монитора и стал 1, возможно закрыли крышку
-                    // Более детальная проверка через встроенный дисплей
                     isLidClosed = !IsBuiltInDisplayActive();
-                }
                 else
-                {
                     isLidClosed = false;
-                }
             }
             catch { }
         }
 
-        private bool IsBuiltInDisplayActive()
+        private static bool IsBuiltInDisplayActive()
         {
             try
             {
-                // Получаем список всех активных дисплеев
-                var displays = MonitorDetector.GetActiveDisplays();
-                
-                // Встроенный дисплей обычно имеет имя содержащее "Generic PnP Monitor"
-                // или "Дисплей с разъемом Plug and Play" или "LCD"
-                foreach (var display in displays)
+                foreach (var display in MonitorDetector.GetActiveDisplays())
                 {
-                    string deviceString = display.DeviceString.ToLower();
-                    string friendlyName = display.FriendlyName.ToLower();
-                    
-                    // Проверяем признаки встроенного дисплея
+                    string deviceString = display.DeviceString.ToLowerInvariant();
+                    string friendlyName = display.FriendlyName.ToLowerInvariant();
                     if (deviceString.Contains("generic") ||
                         deviceString.Contains("pnp") ||
                         deviceString.Contains("lcd") ||
@@ -515,107 +452,94 @@ namespace SleepMngr
                         return true;
                     }
                 }
-                
-                return false;
             }
-            catch
-            {
-                return false;
-            }
+            catch { }
+
+            return false;
         }
 
-        private void OnTrayIconDoubleClick(object? sender, EventArgs e)
-        {
-            ShowStatus();
-        }
+        private void OnTrayIconDoubleClick(object? sender, EventArgs e) => ShowStatus();
+        private void OnStatusClick(object? sender, EventArgs e) => ShowStatus();
 
-        private void OnStatusClick(object? sender, EventArgs e)
-        {
-            ShowStatus();
-        }
-        
         private void OnRestoreLidSettingsClick(object? sender, EventArgs e)
         {
             var result = MessageBox.Show(
-                "Принудительно восстановить настройки крышки на 'Сон'?\n\n" +
-                "Это установит действие при закрытии крышки:\n" +
-                "- От сети: Сон\n" +
-                "- От батареи: Сон",
-                "Восстановление настроек",
+                T(
+                    "Принудительно восстановить настройки крышки на 'Сон'?\n\nЭто установит действие при закрытии крышки:\n- От сети: Сон\n- От батареи: Сон",
+                    "Force lid-close settings back to 'Sleep'?\n\nThis will set the lid-close action to:\n- Plugged in: Sleep\n- On battery: Sleep"),
+                T("Восстановление настроек", "Restore settings"),
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Question);
-            
-            if (result == DialogResult.Yes)
+
+            if (result != DialogResult.Yes)
+                return;
+
+            if (lidActionManager.ForceRestoreToSleep())
             {
-                if (lidActionManager.ForceRestoreToSleep())
-                {
-                    SystemSounds.Asterisk.Play();
-                    MessageBox.Show(
-                        "Настройки крышки успешно восстановлены.\n" +
-                        "Теперь ноутбук будет засыпать при закрытии крышки.",
-                        "Успешно",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Information);
-                }
-                else
-                {
-                    SystemSounds.Hand.Play();
-                    MessageBox.Show(
-                        "Не удалось восстановить настройки.\n" +
-                        "Попробуйте запустить программу от имени администратора.",
-                        "Ошибка",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Error);
-                }
+                SystemSounds.Asterisk.Play();
+                MessageBox.Show(
+                    T(
+                        "Настройки крышки успешно восстановлены.\nТеперь ноутбук будет засыпать при закрытии крышки.",
+                        "Lid settings restored successfully.\nThe laptop will now sleep when the lid is closed."),
+                    T("Успешно", "Success"),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            else
+            {
+                SystemSounds.Hand.Play();
+                MessageBox.Show(
+                    T(
+                        "Не удалось восстановить настройки.\nПопробуйте запустить программу от имени администратора.",
+                        "Could not restore the settings.\nTry running the application as administrator."),
+                    T("Ошибка", "Error"),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
             }
         }
 
         private void OnMouseWakeClick(object? sender, EventArgs e)
         {
             bool shouldDisable = mouseWakeMenuItem.Checked;
-            
             if (shouldDisable)
             {
                 var mice = WakeManager.GetWakeArmedMouseDevices();
                 if (mice.Count == 0)
                 {
                     MessageBox.Show(
-                        "Не найдено мышиных устройств, которые могут будить систему.\n\n" +
-                        "Возможно, мышь уже отключена от пробуждения.",
-                        "Информация",
+                        T(
+                            "Не найдено мышиных устройств, которые могут будить систему.\n\nВозможно, мышь уже отключена от пробуждения.",
+                            "No mouse devices capable of waking the system were found.\n\nMouse wake may already be disabled."),
+                        T("Информация", "Information"),
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information);
                     WakeManager.DisableMouseWake();
                     return;
                 }
-                
+
                 if (WakeManager.DisableMouseWake())
-                {
                     SystemSounds.Asterisk.Play();
-                }
                 else
                 {
                     mouseWakeMenuItem.Checked = false;
                     SystemSounds.Hand.Play();
                     MessageBox.Show(
-                        "Не удалось отключить пробуждение мышью.\n" +
-                        "Попробуйте запустить программу от имени администратора.",
-                        "Ошибка",
+                        T(
+                            "Не удалось отключить пробуждение мышью.\nПопробуйте запустить программу от имени администратора.",
+                            "Could not disable mouse wake.\nTry running the application as administrator."),
+                        T("Ошибка", "Error"),
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Error);
                 }
             }
+            else if (WakeManager.EnableMouseWake())
+            {
+                SystemSounds.Asterisk.Play();
+            }
             else
             {
-                if (WakeManager.EnableMouseWake())
-                {
-                    SystemSounds.Asterisk.Play();
-                }
-                else
-                {
-                    mouseWakeMenuItem.Checked = true;
-                    SystemSounds.Hand.Play();
-                }
+                mouseWakeMenuItem.Checked = true;
+                SystemSounds.Hand.Play();
             }
         }
 
@@ -624,43 +548,40 @@ namespace SleepMngr
             try
             {
                 string logFile = PowerManager.GetLogFile();
-                
-                // Проверяем существует ли файл
-                if (System.IO.File.Exists(logFile))
+                if (!System.IO.File.Exists(logFile))
                 {
-                    // Открываем в Notepad
-                    System.Diagnostics.Process.Start("notepad.exe", logFile);
-                }
-                else
-                {
-                    // Создаем папку и файл если их нет
-                    string dir = System.IO.Path.GetDirectoryName(logFile);
-                    if (!System.IO.Directory.Exists(dir))
-                    {
-                        System.IO.Directory.CreateDirectory(dir);
-                    }
-                    
-                    System.IO.File.WriteAllText(logFile, 
-                        $"Лог создан: {DateTime.Now}\r\n" +
-                        $"Файл лога будет содержать информацию о попытках перехода в спящий режим.\r\n\r\n");
-                    
+                    string? directory = System.IO.Path.GetDirectoryName(logFile);
+                    if (!string.IsNullOrEmpty(directory))
+                        System.IO.Directory.CreateDirectory(directory);
+
+                    System.IO.File.WriteAllText(
+                        logFile,
+                        T(
+                            $"Лог создан: {DateTime.Now}\r\nФайл лога будет содержать информацию о попытках перехода в спящий режим.\r\n\r\n",
+                            $"Log created: {DateTime.Now}\r\nThis log contains information about attempts to enter sleep mode.\r\n\r\n"));
+
                     MessageBox.Show(
-                        $"Файл лога создан:\n{logFile}\n\n" +
-                        "После использования функции 'Заснуть сейчас' здесь появится информация о попытках перехода в сон.",
-                        "Лог",
+                        T(
+                            $"Файл лога создан:\n{logFile}\n\nПосле использования функции 'Заснуть сейчас' здесь появится информация о попытках перехода в сон.",
+                            $"Log file created:\n{logFile}\n\nAfter using 'Sleep now', sleep attempts will be recorded here."),
+                        T("Лог", "Log"),
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information);
-                    
-                    System.Diagnostics.Process.Start("notepad.exe", logFile);
                 }
+
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "notepad.exe",
+                    Arguments = $"\"{logFile}\"",
+                    UseShellExecute = true
+                });
             }
             catch (Exception ex)
             {
                 SystemSounds.Hand.Play();
                 MessageBox.Show(
-                    $"Не удалось открыть файл лога.\n\n" +
-                    $"Ошибка: {ex.Message}",
-                    "Ошибка",
+                    T($"Не удалось открыть файл лога.\n\nОшибка: {ex.Message}", $"Could not open the log file.\n\nError: {ex.Message}"),
+                    T("Ошибка", "Error"),
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
             }
@@ -668,45 +589,41 @@ namespace SleepMngr
 
         private void OnSleepNowClick(object? sender, EventArgs e)
         {
-            // Показываем предупреждение перед переходом в сон
             var result = MessageBox.Show(
-                "Компьютер сейчас уйдет в спящий режим.\n\n" +
-                "⚠️ Рекомендация: Закройте Slack, Teams, Chrome\n" +
-                "для надежного перехода в сон.\n\n" +
-                "Продолжить?",
-                "Подтверждение",
+                T(
+                    "Компьютер сейчас уйдет в спящий режим.\n\n⚠️ Рекомендация: Закройте Slack, Teams, Chrome\nдля надежного перехода в сон.\n\nПродолжить?",
+                    "The computer will enter sleep mode now.\n\n⚠️ Recommendation: close Slack, Teams, and Chrome\nfor a more reliable transition to sleep.\n\nContinue?"),
+                T("Подтверждение", "Confirmation"),
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Question);
-            
-            if (result == DialogResult.Yes)
+
+            if (result != DialogResult.Yes)
+                return;
+
+            if (!PowerManager.GoToSleep())
             {
-                // Даем время закрыть диалог
-                System.Threading.Thread.Sleep(500);
-                
-                if (!PowerManager.GoToSleep())
+                SystemSounds.Hand.Play();
+                string logFile = PowerManager.GetLogFile();
+                var errorResult = MessageBox.Show(
+                    T(
+                        $"Не удалось перевести компьютер в спящий режим.\n\nВозможные причины:\n- Заблокировано групповыми политиками Windows\n- Открыты приложения, блокирующие сон\n- Требуются права администратора\n\nЛог ошибок сохранен в:\n{logFile}\n\nОткрыть файл лога?",
+                        $"Could not put the computer to sleep.\n\nPossible reasons:\n- Blocked by Windows Group Policy\n- Applications are preventing sleep\n- Administrator rights are required\n\nError log saved to:\n{logFile}\n\nOpen the log file?"),
+                    T("Ошибка", "Error"),
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Error);
+
+                if (errorResult == DialogResult.Yes)
                 {
-                    SystemSounds.Hand.Play();
-                    string logFile = PowerManager.GetLogFile();
-                    var errorResult = MessageBox.Show(
-                        "Не удалось перевести компьютер в спящий режим.\n\n" +
-                        "Возможные причины:\n" +
-                        "- Заблокировано групповыми политиками Windows\n" +
-                        "- Открыты приложения, блокирующие сон\n" +
-                        "- Требуются права администратора\n\n" +
-                        $"Лог ошибок сохранен в:\n{logFile}\n\n" +
-                        "Открыть файл лога?",
-                        "Ошибка",
-                        MessageBoxButtons.YesNo,
-                        MessageBoxIcon.Error);
-                    
-                    if (errorResult == DialogResult.Yes)
+                    try
                     {
-                        try
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                         {
-                            System.Diagnostics.Process.Start("notepad.exe", logFile);
-                        }
-                        catch { }
+                            FileName = "notepad.exe",
+                            Arguments = $"\"{logFile}\"",
+                            UseShellExecute = true
+                        });
                     }
+                    catch { }
                 }
             }
         }
@@ -719,74 +636,88 @@ namespace SleepMngr
             bool preventing = PowerManager.IsPreventingSleep();
             bool lidSettingsModified = lidActionManager.IsModified;
 
-            string displayInfo = MonitorDetector.GetDisplaysDebugInfo();
-            
             string modeText = currentMode switch
             {
-                WorkMode.Auto => "🔄 Автоматически",
-                WorkMode.AlwaysPrevent => "🟡 Всегда не засыпать",
-                WorkMode.AlwaysAllow => "🔵 Всегда засыпать",
-                _ => "Неизвестно"
+                WorkMode.Auto => T("🔄 Автоматически", "🔄 Automatic"),
+                WorkMode.AlwaysPrevent => T("🟡 Всегда не засыпать", "🟡 Always prevent sleep"),
+                WorkMode.AlwaysAllow => T("🔵 Всегда засыпать", "🔵 Always allow sleep"),
+                _ => T("Неизвестно", "Unknown")
             };
 
-            string message = $"Режим работы: {modeText}\n\n" +
-                           $"Внешний монитор: {(hasExternal ? "Подключен ✓" : "Не подключен ✗")}\n" +
-                           $"Активных дисплеев: {activeCount}\n" +
-                           $"Физически подключенных мониторов: {attachedCount}\n\n" +
-                           $"{displayInfo}" +
-                           $"Предотвращение сна: {(preventing ? "Активно ✓" : "Неактивно ✗")}\n" +
-                           $"Настройки крышки: {(lidSettingsModified ? "Ничего не делать" : "Сон")}\n\n" +
-                           $"Логика работы:\n" +
-                           $"• Авто: определяется по наличию внешнего монитора\n" +
-                           $"• Всегда не засыпать: крышка не влияет на работу\n" +
-                           $"• Всегда засыпать: ноутбук засыпает при закрытии крышки";
+            var sb = new StringBuilder();
+            sb.AppendLine($"{T("Режим работы", "Operating mode")}: {modeText}");
+            sb.AppendLine();
+            sb.AppendLine($"{T("Внешний монитор", "External monitor")}: {(hasExternal ? T("Подключен ✓", "Connected ✓") : T("Не подключен ✗", "Not connected ✗"))}");
+            sb.AppendLine($"{T("Активных дисплеев", "Active displays")}: {activeCount}");
+            sb.AppendLine($"{T("Физически подключенных мониторов", "Physically connected monitors")}: {attachedCount}");
+            sb.AppendLine();
 
-            MessageBox.Show(message, "Lid Sleep Manager", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            var displays = MonitorDetector.GetActiveDisplays();
+            for (int i = 0; i < displays.Count; i++)
+            {
+                var display = displays[i];
+                sb.AppendLine($"{T("Дисплей", "Display")} {i + 1}: {display.FriendlyName}");
+                sb.AppendLine($"  {T("Разрешение", "Resolution")}: {display.Bounds}");
+                sb.AppendLine($"  {T("Основной", "Primary")}: {(display.IsPrimary ? T("Да", "Yes") : T("Нет", "No"))}");
+            }
+
+            if (displays.Count > 0)
+                sb.AppendLine();
+
+            sb.AppendLine($"{T("Предотвращение сна", "Sleep prevention")}: {(preventing ? T("Активно ✓", "Active ✓") : T("Неактивно ✗", "Inactive ✗"))}");
+            sb.AppendLine($"{T("Настройки крышки", "Lid settings")}: {(lidSettingsModified ? T("Ничего не делать", "Do nothing") : T("Сон", "Sleep"))}");
+            sb.AppendLine();
+            sb.AppendLine(T("Логика работы:", "How it works:"));
+            sb.AppendLine(T("• Авто: определяется по наличию внешнего монитора", "• Auto: determined by the presence of an external monitor"));
+            sb.AppendLine(T("• Всегда не засыпать: крышка не влияет на работу", "• Always prevent sleep: closing the lid does not put the laptop to sleep"));
+            sb.AppendLine(T("• Всегда засыпать: ноутбук засыпает при закрытии крышки", "• Always allow sleep: the laptop sleeps when the lid is closed"));
+
+            MessageBox.Show(sb.ToString(), "Lid Sleep Manager", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         private void OnExitClick(object? sender, EventArgs e)
         {
-            // Проверяем текущий статус мониторов перед выходом
+            if (isExiting)
+                return;
+
+            isExiting = true;
+
+            monitorCheckTimer.Stop();
+            autoSleepTimer.Stop();
+
+            SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+            SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+            SystemEvents.SessionSwitch -= OnSessionSwitch;
+
             bool currentHasExternalMonitor = MonitorDetector.HasExternalMonitor();
-            
             if (currentHasExternalMonitor)
             {
-                // Внешний монитор подключен - оставляем "Ничего не делать"
                 PowerManager.PreventSleep();
                 lidActionManager.SetLidActionDoNothing();
             }
             else
             {
-                // Внешнего монитора нет - восстанавливаем "Сон"
                 PowerManager.AllowSleep();
                 lidActionManager.RestoreLidAction();
             }
 
-            // Восстанавливаем пробуждение мышью если было отключено
             if (WakeManager.IsMouseWakeDisabled)
-            {
                 WakeManager.EnableMouseWake();
-            }
 
-            // Cleanup
-            SystemEvents.PowerModeChanged -= OnPowerModeChanged;
-            SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
-            SystemEvents.SessionSwitch -= OnSessionSwitch;
-            
-            monitorCheckTimer.Stop();
-            monitorCheckTimer.Dispose();
-            
-            autoSleepTimer.Stop();
-            autoSleepTimer.Dispose();
-            
+            trayIcon.DoubleClick -= OnTrayIconDoubleClick;
             trayIcon.Visible = false;
+            trayIcon.ContextMenuStrip?.Dispose();
             trayIcon.Dispose();
 
-            // Dispose icons
-            blueIcon?.Dispose();
-            yellowIcon?.Dispose();
-            darkBlueIcon?.Dispose();
-            darkYellowIcon?.Dispose();
+            monitorCheckTimer.Tick -= OnMonitorCheckTimerTick;
+            autoSleepTimer.Tick -= OnAutoSleepTimerTick;
+            monitorCheckTimer.Dispose();
+            autoSleepTimer.Dispose();
+
+            blueIcon.Dispose();
+            yellowIcon.Dispose();
+            darkBlueIcon.Dispose();
+            darkYellowIcon.Dispose();
 
             Application.Exit();
         }
