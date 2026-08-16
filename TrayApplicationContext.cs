@@ -2,7 +2,6 @@ using System;
 using System.Drawing;
 using System.Media;
 using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
@@ -239,17 +238,14 @@ namespace SleepMngr
 
         private void TriggerAutoSleep()
         {
-            if (autoSleepTriggered)
+            if (autoSleepTriggered || isExiting)
                 return;
 
             autoSleepTriggered = true;
             displayOffTime = null;
 
-            _ = Task.Run(() =>
-            {
-                if (!PowerManager.GoToSleep())
-                    System.Diagnostics.Debug.WriteLine("Failed to trigger auto sleep");
-            });
+            if (!PowerManager.GoToSleep())
+                System.Diagnostics.Debug.WriteLine("Failed to trigger auto sleep");
         }
 
         private void UpdateMonitorStatus()
