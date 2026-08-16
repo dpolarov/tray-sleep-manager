@@ -26,6 +26,7 @@ namespace SleepMngr
         private WorkMode currentMode = WorkMode.Auto;
         private ToolStripMenuItem statusMenuItem = null!;
         private ToolStripMenuItem mouseWakeMenuItem = null!;
+        private ToolStripMenuItem loggingMenuItem = null!;
         private bool autoSleepTriggered;
         private bool wasClamshellMode;
         private DateTime? externalDisconnectedTime;
@@ -64,6 +65,10 @@ namespace SleepMngr
             CheckLidState();
             UpdateDisplayState();
             UpdatePowerState();
+
+            AppLog.Write(
+                "App",
+                $"Started; language={Localization.CurrentLanguage}; mode={currentMode}; externalMonitor={hasExternalMonitor}");
         }
 
         private static string T(string russian, string english) => Localization.T(russian, english);
@@ -121,6 +126,14 @@ namespace SleepMngr
             languageItem.DropDownItems.Add(englishItem);
             menu.Items.Add(languageItem);
 
+            loggingMenuItem = new ToolStripMenuItem(T("📝 Вести лог", "📝 Enable logging"))
+            {
+                CheckOnClick = true,
+                Checked = AppLog.Enabled
+            };
+            loggingMenuItem.Click += OnLoggingClick;
+            menu.Items.Add(loggingMenuItem);
+
             menu.Items.Add(new ToolStripSeparator());
 
             var sleepNowItem = new ToolStripMenuItem(T("💤 Заснуть сейчас", "💤 Sleep now"));
@@ -149,11 +162,19 @@ namespace SleepMngr
             if (Localization.CurrentLanguage == language)
                 return;
 
+            AppLanguage previousLanguage = Localization.CurrentLanguage;
             Localization.SetLanguage(language);
+            AppLog.Write("UI", $"Language changed: {previousLanguage} -> {language}");
+
             var previousMenu = trayIcon.ContextMenuStrip;
             trayIcon.ContextMenuStrip = CreateContextMenu();
             previousMenu?.Dispose();
             UpdatePowerState();
+        }
+
+        private void OnLoggingClick(object? sender, EventArgs e)
+        {
+            AppLog.SetEnabled(loggingMenuItem.Checked);
         }
 
         private void UpdateMenuCheckmarks(ContextMenuStrip menu)
@@ -171,6 +192,7 @@ namespace SleepMngr
                 : T("Сон разрешен", "Sleep allowed");
             statusMenuItem.Text = $"{T("Статус", "Status")}: {modeText} • {stateText}";
             mouseWakeMenuItem.Checked = WakeManager.IsMouseWakeDisabled;
+            loggingMenuItem.Checked = AppLog.Enabled;
 
             if (menu.Items.Count > 2 && menu.Items[2] is ToolStripMenuItem modeMenuItem)
             {
@@ -188,7 +210,10 @@ namespace SleepMngr
             if (currentMode == mode)
                 return;
 
+            WorkMode previousMode = currentMode;
             currentMode = mode;
+            AppLog.Write("Mode", $"Changed: {previousMode} -> {currentMode}");
+
             if (mode == WorkMode.Auto)
                 hasExternalMonitor = MonitorDetector.HasExternalMonitor();
 
@@ -210,6 +235,7 @@ namespace SleepMngr
             if (isLidClosed && isDisplayOff && displayOffTime.HasValue &&
                 (DateTime.Now - displayOffTime.Value).TotalSeconds >= 10)
             {
+                AppLog.Write("AutoSleep", "Trigger: lid closed and display off for at least 10 seconds");
                 TriggerAutoSleep();
                 return;
             }
@@ -218,6 +244,7 @@ namespace SleepMngr
                 (DateTime.Now - externalDisconnectedTime.Value).TotalSeconds >= 3)
             {
                 externalDisconnectedTime = null;
+                AppLog.Write("AutoSleep", "Trigger: external monitor disconnected in clamshell mode");
                 TriggerAutoSleep();
             }
         }
@@ -232,6 +259,7 @@ namespace SleepMngr
 
                 isDisplayOff = currentDisplayOff;
                 displayOffTime = isDisplayOff ? DateTime.Now : null;
+                AppLog.Write("Display", $"Display state changed: {(isDisplayOff ? "off" : "on")}");
             }
             catch { }
         }
@@ -243,9 +271,13 @@ namespace SleepMngr
 
             autoSleepTriggered = true;
             displayOffTime = null;
+            AppLog.Write("AutoSleep", "Executing automatic sleep command");
 
             if (!PowerManager.GoToSleep())
+            {
+                AppLog.Write("AutoSleep", "Automatic sleep command reported failure");
                 System.Diagnostics.Debug.WriteLine("Failed to trigger auto sleep");
+            }
         }
 
         private void UpdateMonitorStatus()
@@ -266,6 +298,9 @@ namespace SleepMngr
 
                 bool wasExternal = hasExternalMonitor;
                 hasExternalMonitor = currentHasExternalMonitor;
+                AppLog.Write(
+                    "Monitor",
+                    $"External monitor changed: {(wasExternal ? "connected" : "disconnected")} -> {(currentHasExternalMonitor ? "connected" : "disconnected")}; active={MonitorDetector.GetMonitorCount()}; attached={MonitorDetector.GetAttachedDisplayCount()}");
                 UpdatePowerState();
 
                 if (currentHasExternalMonitor)
@@ -326,16 +361,21 @@ namespace SleepMngr
             }
 
             bool wasPreventingSleep = PowerManager.IsPreventingSleep();
+            bool lidOperationSucceeded;
             if (shouldPreventSleep)
             {
                 PowerManager.PreventSleep();
-                lidActionManager.SetLidActionDoNothing();
+                lidOperationSucceeded = lidActionManager.SetLidActionDoNothing();
             }
             else
             {
                 PowerManager.AllowSleep();
-                lidActionManager.RestoreLidAction();
+                lidOperationSucceeded = lidActionManager.RestoreLidAction();
             }
+
+            AppLog.Write(
+                "PowerState",
+                $"Applied: mode={currentMode}; preventSleep={shouldPreventSleep}; executionStateActive={PowerManager.IsPreventingSleep()}; lidOperation={(lidOperationSucceeded ? "success" : "failed")}");
 
             trayIcon.Icon = selectedIcon;
             trayIcon.Text = $"Sleep Manager - {modeText}";
@@ -358,6 +398,8 @@ namespace SleepMngr
 
         private void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
         {
+            AppLog.Write("System", $"Power mode changed: {e.Mode}");
+
             switch (e.Mode)
             {
                 case PowerModes.Suspend:
@@ -378,6 +420,7 @@ namespace SleepMngr
             if (isExiting)
                 return;
 
+            AppLog.Write("System", "DisplaySettingsChanged event received");
             UpdateMonitorStatus();
             UpdateDisplayState();
         }
@@ -386,6 +429,8 @@ namespace SleepMngr
         {
             if (isExiting)
                 return;
+
+            AppLog.Write("System", $"Session switch: {e.Reason}");
 
             switch (e.Reason)
             {
@@ -454,11 +499,22 @@ namespace SleepMngr
             return false;
         }
 
-        private void OnTrayIconDoubleClick(object? sender, EventArgs e) => ShowStatus();
-        private void OnStatusClick(object? sender, EventArgs e) => ShowStatus();
+        private void OnTrayIconDoubleClick(object? sender, EventArgs e)
+        {
+            AppLog.Write("UI", "Command: show status (double-click)");
+            ShowStatus();
+        }
+
+        private void OnStatusClick(object? sender, EventArgs e)
+        {
+            AppLog.Write("UI", "Command: show status");
+            ShowStatus();
+        }
 
         private void OnRestoreLidSettingsClick(object? sender, EventArgs e)
         {
+            AppLog.Write("UI", "Command: restore lid settings requested");
+
             var result = MessageBox.Show(
                 T(
                     "Принудительно восстановить настройки крышки на 'Сон'?\n\nЭто установит действие при закрытии крышки:\n- От сети: Сон\n- От батареи: Сон",
@@ -468,10 +524,14 @@ namespace SleepMngr
                 MessageBoxIcon.Question);
 
             if (result != DialogResult.Yes)
+            {
+                AppLog.Write("UI", "Command cancelled: restore lid settings");
                 return;
+            }
 
             if (lidActionManager.ForceRestoreToSleep())
             {
+                AppLog.Write("UI", "Restore lid settings: success");
                 SystemSounds.Asterisk.Play();
                 MessageBox.Show(
                     T(
@@ -483,6 +543,7 @@ namespace SleepMngr
             }
             else
             {
+                AppLog.Write("UI", $"Restore lid settings: failed; {lidActionManager.LastError}");
                 SystemSounds.Hand.Play();
                 MessageBox.Show(
                     T(
@@ -497,11 +558,14 @@ namespace SleepMngr
         private void OnMouseWakeClick(object? sender, EventArgs e)
         {
             bool shouldDisable = mouseWakeMenuItem.Checked;
+            AppLog.Write("UI", $"Command: mouse wake -> {(shouldDisable ? "disable" : "enable")}");
+
             if (shouldDisable)
             {
                 var mice = WakeManager.GetWakeArmedMouseDevices();
                 if (mice.Count == 0)
                 {
+                    AppLog.Write("Wake", "No wake-armed mouse devices found");
                     MessageBox.Show(
                         T(
                             "Не найдено мышиных устройств, которые могут будить систему.\n\nВозможно, мышь уже отключена от пробуждения.",
@@ -514,9 +578,13 @@ namespace SleepMngr
                 }
 
                 if (WakeManager.DisableMouseWake())
+                {
+                    AppLog.Write("Wake", "Mouse wake disabled successfully");
                     SystemSounds.Asterisk.Play();
+                }
                 else
                 {
+                    AppLog.Write("Wake", "Mouse wake disable failed");
                     mouseWakeMenuItem.Checked = false;
                     SystemSounds.Hand.Play();
                     MessageBox.Show(
@@ -530,10 +598,12 @@ namespace SleepMngr
             }
             else if (WakeManager.EnableMouseWake())
             {
+                AppLog.Write("Wake", "Mouse wake enabled successfully");
                 SystemSounds.Asterisk.Play();
             }
             else
             {
+                AppLog.Write("Wake", "Mouse wake enable failed");
                 mouseWakeMenuItem.Checked = true;
                 SystemSounds.Hand.Play();
             }
@@ -543,9 +613,23 @@ namespace SleepMngr
         {
             try
             {
-                string logFile = PowerManager.GetLogFile();
+                AppLog.Write("UI", "Command: open log");
+                string logFile = AppLog.FilePath;
+
                 if (!System.IO.File.Exists(logFile))
                 {
+                    if (!AppLog.Enabled)
+                    {
+                        MessageBox.Show(
+                            T(
+                                "Логирование выключено, и файл лога ещё не создан.\n\nВключите 'Вести лог', чтобы начать запись.",
+                                "Logging is disabled and no log file exists yet.\n\nEnable 'Enable logging' to start recording."),
+                            T("Лог", "Log"),
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Information);
+                        return;
+                    }
+
                     string? directory = System.IO.Path.GetDirectoryName(logFile);
                     if (!string.IsNullOrEmpty(directory))
                         System.IO.Directory.CreateDirectory(directory);
@@ -553,16 +637,8 @@ namespace SleepMngr
                     System.IO.File.WriteAllText(
                         logFile,
                         T(
-                            $"Лог создан: {DateTime.Now}\r\nФайл лога будет содержать информацию о попытках перехода в спящий режим.\r\n\r\n",
-                            $"Log created: {DateTime.Now}\r\nThis log contains information about attempts to enter sleep mode.\r\n\r\n"));
-
-                    MessageBox.Show(
-                        T(
-                            $"Файл лога создан:\n{logFile}\n\nПосле использования функции 'Заснуть сейчас' здесь появится информация о попытках перехода в сон.",
-                            $"Log file created:\n{logFile}\n\nAfter using 'Sleep now', sleep attempts will be recorded here."),
-                        T("Лог", "Log"),
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Information);
+                            $"Лог создан: {DateTime.Now}\r\n\r\n",
+                            $"Log created: {DateTime.Now}\r\n\r\n"));
                 }
 
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
@@ -585,6 +661,8 @@ namespace SleepMngr
 
         private void OnSleepNowClick(object? sender, EventArgs e)
         {
+            AppLog.Write("UI", "Command: Sleep now requested");
+
             var result = MessageBox.Show(
                 T(
                     "Компьютер сейчас уйдет в спящий режим.\n\n⚠️ Рекомендация: Закройте Slack, Teams, Chrome\nдля надежного перехода в сон.\n\nПродолжить?",
@@ -594,32 +672,51 @@ namespace SleepMngr
                 MessageBoxIcon.Question);
 
             if (result != DialogResult.Yes)
+            {
+                AppLog.Write("UI", "Command cancelled: Sleep now");
                 return;
+            }
 
+            AppLog.Write("UI", "Command confirmed: Sleep now");
             if (!PowerManager.GoToSleep())
             {
+                AppLog.Write("Sleep", "Sleep now reported failure");
                 SystemSounds.Hand.Play();
-                string logFile = PowerManager.GetLogFile();
-                var errorResult = MessageBox.Show(
-                    T(
-                        $"Не удалось перевести компьютер в спящий режим.\n\nВозможные причины:\n- Заблокировано групповыми политиками Windows\n- Открыты приложения, блокирующие сон\n- Требуются права администратора\n\nЛог ошибок сохранен в:\n{logFile}\n\nОткрыть файл лога?",
-                        $"Could not put the computer to sleep.\n\nPossible reasons:\n- Blocked by Windows Group Policy\n- Applications are preventing sleep\n- Administrator rights are required\n\nError log saved to:\n{logFile}\n\nOpen the log file?"),
-                    T("Ошибка", "Error"),
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Error);
 
-                if (errorResult == DialogResult.Yes)
+                if (AppLog.Enabled)
                 {
-                    try
+                    string logFile = AppLog.FilePath;
+                    var errorResult = MessageBox.Show(
+                        T(
+                            $"Не удалось перевести компьютер в спящий режим.\n\nВозможные причины:\n- Заблокировано групповыми политиками Windows\n- Открыты приложения, блокирующие сон\n- Требуются права администратора\n\nЛог ошибок сохранен в:\n{logFile}\n\nОткрыть файл лога?",
+                            $"Could not put the computer to sleep.\n\nPossible reasons:\n- Blocked by Windows Group Policy\n- Applications are preventing sleep\n- Administrator rights are required\n\nError log saved to:\n{logFile}\n\nOpen the log file?"),
+                        T("Ошибка", "Error"),
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Error);
+
+                    if (errorResult == DialogResult.Yes)
                     {
-                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        try
                         {
-                            FileName = "notepad.exe",
-                            Arguments = $"\"{logFile}\"",
-                            UseShellExecute = true
-                        });
+                            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                            {
+                                FileName = "notepad.exe",
+                                Arguments = $"\"{logFile}\"",
+                                UseShellExecute = true
+                            });
+                        }
+                        catch { }
                     }
-                    catch { }
+                }
+                else
+                {
+                    MessageBox.Show(
+                        T(
+                            "Не удалось перевести компьютер в спящий режим.\n\nЛогирование выключено. Включите 'Вести лог' и повторите попытку для диагностики.",
+                            "Could not put the computer to sleep.\n\nLogging is disabled. Enable logging and repeat the attempt for diagnostics."),
+                        T("Ошибка", "Error"),
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
                 }
             }
         }
@@ -662,6 +759,7 @@ namespace SleepMngr
 
             sb.AppendLine($"{T("Предотвращение сна", "Sleep prevention")}: {(preventing ? T("Активно ✓", "Active ✓") : T("Неактивно ✗", "Inactive ✗"))}");
             sb.AppendLine($"{T("Настройки крышки", "Lid settings")}: {(lidSettingsModified ? T("Ничего не делать", "Do nothing") : T("Сон", "Sleep"))}");
+            sb.AppendLine($"{T("Логирование", "Logging")}: {(AppLog.Enabled ? T("Включено ✓", "Enabled ✓") : T("Выключено ✗", "Disabled ✗"))}");
             sb.AppendLine();
             sb.AppendLine(T("Логика работы:", "How it works:"));
             sb.AppendLine(T("• Авто: определяется по наличию внешнего монитора", "• Auto: determined by the presence of an external monitor"));
@@ -676,6 +774,7 @@ namespace SleepMngr
             if (isExiting)
                 return;
 
+            AppLog.Write("UI", "Command: Exit");
             isExiting = true;
 
             monitorCheckTimer.Stop();
@@ -715,6 +814,7 @@ namespace SleepMngr
             darkBlueIcon.Dispose();
             darkYellowIcon.Dispose();
 
+            AppLog.Write("App", "Exited");
             Application.Exit();
         }
     }
