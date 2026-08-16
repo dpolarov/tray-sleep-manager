@@ -1,283 +1,273 @@
 # SleepMngr
 
-Программа для Windows, которая предотвращает переход ноутбука в спящий режим при закрытии крышки, если подключен внешний монитор.
+**English** | [Русский](README.ru.md)
 
-![Screen](image.png)
-![Tray](image-1.png)
-## Возможности
+[![Build Windows](https://github.com/dpolarov/tray-sleep-manager/actions/workflows/build.yml/badge.svg)](https://github.com/dpolarov/tray-sleep-manager/actions/workflows/build.yml)
+[![Latest release](https://img.shields.io/github/v/release/dpolarov/tray-sleep-manager)](https://github.com/dpolarov/tray-sleep-manager/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D4)](https://github.com/dpolarov/tray-sleep-manager)
 
-- 🖥️ Автоматическое определение подключенных мониторов (через WMI)
-- 💤 Предотвращение сна при закрытии крышки
-- ⏰ **Автоматический сон через 10 секунд** - в автоматическом режиме, если крышка уже закрыта и дисплей выключился, ноутбук автоматически уходит в сон через 10 секунд
-- 🎛️ Три режима работы:
-  - **Автоматически** - определяется по наличию внешнего монитора
-  - **Всегда не засыпать** - крышка не влияет на работу
-  - **Всегда засыпать** - ноутбук засыпает при закрытии крышки
-- 🔄 Автоматическое изменение настроек Windows при каждом подключении/отключении монитора
-- 📊 Цветная иконка в системном трее:
-  - 🔵 **Синяя** - автоматический режим, сон разрешен
-  - 🟡 **Желтая** - автоматический режим, сон запрещен
-  - 🔷 **Темно-синяя** - ручной режим "🔷 Всегда засыпать"
-  - 🟠 **Оранжевая** - ручной режим "🟠 Всегда не засыпать"
-- 🔔 Звуковые уведомления при изменении статуса защиты
-- 🔒 Единственный экземпляр программы (новая копия заменяет старую)
-- 🔧 Ручное восстановление настроек крышки
-- ℹ️ Детальное окно статуса с информацией о всех дисплеях
+SleepMngr is a small Windows tray utility for laptops used with external monitors. It automatically changes sleep protection and the lid-close action so a laptop can keep running in clamshell mode, while still returning to normal sleep behavior when the external display is disconnected.
 
-## Требования
+![SleepMngr status](image.png)
+![SleepMngr tray menu](image-1.png)
 
-### Для запуска готового EXE:
-- Windows 10/11 (x64)
-- [.NET 8.0 Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) (Desktop Runtime)
+## Download
 
-### Для сборки из исходников:
-- [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+The easiest way to use SleepMngr is to download the latest release:
 
-## Сборка
+**[Download the latest release](https://github.com/dpolarov/tray-sleep-manager/releases/latest)**
 
-Установите [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
+Two Windows x64 packages are published:
 
-### 🚀 Быстрая сборка через CMD скрипты
+- **`SleepMngr-win-x64-standalone.zip`** — recommended for most users. Includes the .NET runtime and does not require a separate installation.
+- **`SleepMngr-win-x64-compact.zip`** — much smaller, but requires the **.NET 8 Desktop Runtime** to be installed.
 
-Просто запустите нужный `.cmd` файл двойным кликом:
+There is no installer. Extract the ZIP and run `SleepMngr.exe`.
 
-- **`build-compact.cmd`** - компактный EXE (~200 КБ, требует .NET Runtime) ⭐ рекомендуется
-- **`build-standalone.cmd`** - автономный EXE (~65 МБ, не требует .NET Runtime)
-- **`build-debug.cmd`** - обычная сборка с DLL (для разработки)
-- **`clean.cmd`** - очистка всех файлов сборки
+Current stable release: **v1.0.0**. See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
----
+## Features
 
-### 📋 Ручная сборка через PowerShell
+- Automatic detection of connected and active displays.
+- Automatic clamshell behavior when an external monitor is connected.
+- Three operating modes: Automatic, Always prevent sleep, and Always allow sleep.
+- Lid-close action management with the original AC/DC values saved and restored.
+- `SetThreadExecutionState` sleep prevention while protection is active.
+- Modern Standby (S0 Low Power Idle) support.
+- Multiple fallback sleep methods for classic S3 systems.
+- Automatic sleep after an external monitor is disconnected while the laptop is in clamshell mode.
+- Optional mouse-wake disabling.
+- Russian and English UI with runtime language switching.
+- Optional structured logging, **disabled by default**.
+- Detailed status window showing monitor and power-state information.
+- Single-instance behavior: starting a new copy replaces the existing instance.
+- Automated Windows builds and GitHub Releases.
 
-Откройте PowerShell в папке проекта.
+## Operating modes
 
-### Вариант 1: Один EXE с внешним .NET Runtime (рекомендуется)
+### Automatic — default
+
+SleepMngr follows the current monitor configuration:
+
+- **External monitor connected** → sleep prevention is enabled and the lid action is set to **Do nothing**.
+- **No external monitor** → sleep prevention is disabled and previously saved lid settings are restored when applicable.
+
+Automatic mode also contains two clamshell safety behaviors:
+
+- If the lid is closed and the display remains off for at least **10 seconds**, SleepMngr triggers sleep.
+- If an external monitor is disconnected while the laptop was operating in clamshell mode, SleepMngr triggers sleep after about **3 seconds**.
+
+### Always prevent sleep
+
+Sleep protection stays enabled regardless of monitor configuration. SleepMngr requests continuous system/display availability and sets the lid-close action to **Do nothing**.
+
+### Always allow sleep
+
+Sleep prevention is disabled regardless of monitor configuration. If SleepMngr previously changed the lid-close action, it restores the saved values.
+
+## Tray menu
+
+The current tray menu contains:
+
+- **Status** — opens detailed display and power information.
+- **Operating mode**
+  - `Automatic`
+  - `Always prevent sleep`
+  - `Always allow sleep`
+- **Restore lid settings** — manually restores the saved lid-close action.
+- **Mouse does not wake** — disables/enables mouse wake through `powercfg`.
+- **Language** — switches between English and Russian immediately.
+- **Enable logging** — turns diagnostic file logging on/off.
+- **Sleep now** — immediately requests system sleep.
+- **Open log** — opens the existing log file.
+- **Exit** — restores/cleans up application state and exits.
+
+Double-clicking the tray icon opens the status window.
+
+## Logging
+
+Logging is **off by default** and the choice is persisted between launches.
+
+When enabled, SleepMngr records mode changes, monitor/display changes, lid operations, mouse-wake operations, `powercfg` commands and results, session/power events, `Sleep now`, and automatic sleep triggers.
+
+Files are stored under:
+
+```text
+%AppData%\SleepMngr\
+```
+
+Main files:
+
+```text
+sleep_log.txt   diagnostic log
+logging.txt     logging on/off setting
+language.txt    selected UI language
+```
+
+Logging failures never stop the tray application.
+
+## Permissions and `powercfg`
+
+SleepMngr is designed to run as a normal Windows user and does **not** automatically request elevation.
+
+However, Windows may reject some `powercfg` operations depending on the machine, security policy, OEM configuration, or user permissions. This is especially relevant to lid-action changes and wake-device configuration.
+
+SleepMngr handles these failures as non-fatal errors:
+
+- the application keeps running;
+- the command exit code, stderr, timeout, or process-start error can be logged;
+- lid changes are verified after writing;
+- original lid values are never guessed if they cannot be read;
+- partial mouse-wake changes are rolled back where possible.
+
+If a feature does not apply correctly, enable logging and try the same operation once. Running as Administrator can also help determine whether the problem is permission-related.
+
+## How lid settings are handled
+
+SleepMngr uses Windows `powercfg` to write the lid-close action, but reads and verifies AC/DC values primarily through native `PowrProf.dll` APIs. This avoids relying on localized `powercfg /query` text.
+
+Before changing the lid action, SleepMngr saves the current AC and DC values. It only treats the operation as successful after the resulting values have been verified.
+
+## Sleep behavior
+
+### Modern Standby (S0 Low Power Idle)
+
+On systems that use Modern Standby, `Sleep now` turns the display off and lets Windows enter S0 Low Power Idle. This behavior has been tested on real Modern Standby hardware.
+
+### Classic S3 sleep
+
+On systems with classic S3 sleep, SleepMngr keeps the existing multi-method fallback strategy. Several Windows APIs and command-based methods are attempted because a successful process launch does not reliably prove that the machine actually entered sleep.
+
+## Monitor detection
+
+SleepMngr combines lightweight Windows display information with WMI data. The main monitor check runs every **2 seconds**.
+
+WMI-derived monitor count and friendly-name data are cached for **10 seconds** and invalidated immediately after a Windows display-settings change event. This reduces background WMI traffic without making monitor connection/disconnection detection noticeably slower.
+
+## Build from source
+
+Requirements:
+
+- Windows 10/11 x64
+- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+
+### Build scripts
+
+From the repository root:
+
+```text
+build-compact.cmd      compact single-file build
+build-standalone.cmd   self-contained single-file build
+build-debug.cmd        development build
+clean.cmd              remove build output
+```
+
+For a normal standalone build, run:
+
+```bat
+build-standalone.cmd
+```
+
+### PowerShell
+
+Restore and build:
 
 ```powershell
-dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true
+dotnet restore SleepMngr.csproj
+dotnet build SleepMngr.csproj -c Release
 ```
 
-**Результат:** `bin\Release\net8.0-windows\win-x64\publish\SleepMngr.exe`
-
-**Характеристики:**
-- ✅ Размер: **~200 КБ**
-- ✅ Один EXE файл (упакованы: SleepMngr.dll + System.Management.dll)
-- ⚠️ Требует: [.NET 8.0 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0) на целевой системе
-
-**Когда использовать:** Для личного использования или распространения в организации, где .NET Runtime уже установлен.
-
----
-
-### Вариант 2: Автономный EXE со встроенным .NET Runtime
+Compact single-file build:
 
 ```powershell
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+dotnet publish SleepMngr.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true
 ```
 
-**Результат:** `bin\Release\net8.0-windows\win-x64\publish\SleepMngr.exe`
-
-**Характеристики:**
-- ✅ Размер: **~65 МБ**
-- ✅ Один EXE файл (включает весь .NET Runtime)
-- ✅ Не требует установки .NET Runtime
-- ✅ Работает на любом Windows 10/11 x64 "из коробки"
-
-**Когда использовать:** Для распространения конечным пользователям, которые могут не иметь .NET Runtime.
-
----
-
-### Вариант 3: Обычная сборка с DLL файлами
+Standalone single-file build:
 
 ```powershell
-dotnet build -c Release
+dotnet publish SleepMngr.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 ```
 
-**Результат:** `bin\Release\net8.0-windows\win-x64\`
+Run the non-destructive CI self-test:
 
-**Характеристики:**
-- 📁 Папка с множеством файлов (EXE + DLL)
-- ⚡ Быстрая сборка для разработки и тестирования
-- ⚠️ Требует: .NET 8.0 Runtime
-
-**Когда использовать:** Для разработки и отладки.
-
-## Запуск
-
-1. Запустите `SleepMngr.exe`
-2. Программа появится в системном трее (правый нижний угол)
-3. При подключении внешнего монитора иконка изменится на щит
-4. Двойной клик по иконке покажет текущий статус
-
-## Использование
-
-### Меню в трее
-
-- **Статус: [режим] • [состояние]** - показывает текущий режим и состояние, при клике открывает детальную информацию о мониторах
-- **Режим работы** ▶
-  - 🔄 **Автоматически** (по умолчанию) - определяет по наличию внешнего монитора
-  - 🟠 **Всегда не засыпать** - ноутбук не засыпает при закрытии крышки
-  - 🔷 **Всегда засыпать** - ноутбук засыпает при закрытии крышки
-- **🔄 Восстанавливать настройки крышки** - чекбокс для принудительного восстановления настроек крышки к "Сон"
-- **🖱️ Мышь не будит** - чекбокс для отключения пробуждения системы от мыши
-- **🚀 Автозапуск** - чекбокс для включения/отключения автозапуска при старте Windows (через реестр)
-- **💤 Заснуть сейчас** - немедленно переводит компьютер в спящий режим без каких-либо проверок
-- **📋 Открыть лог** - открывает файл лога с информацией о попытках перехода в сон
-- **Выход** - закрывает программу и применяет настройки на основе текущего статуса
-
-## Как это работает
-
-### Режимы работы:
-
-**🔄 Автоматически (по умолчанию):**
-- ✅ Внешний монитор **подключен** → ноутбук **НЕ засыпает** при закрытии крышки
-- ❌ Внешнего монитора **нет** → ноутбук **засыпает** при закрытии крышки
-- ⏰ **Умный сон**: если крышка уже закрыта и дисплей выключается, ноутбук автоматически уходит в сон через 10 секунд
-- При переключении в этот режим настройки применяются принудительно на основе текущего статуса
-
-**🟡 Всегда не засыпать:**
-- Ноутбук никогда не засыпает при закрытии крышки
-- Независимо от наличия внешних мониторов
-
-**🔵 Всегда засыпать:**
-- Ноутбук всегда засыпает при закрытии крышки
-- Независимо от наличия внешних мониторов
-
-### Технический процесс:
-
-1. **При запуске**: 
-   - Проверяет единственность экземпляра (закрывает старую копию если есть)
-   - Определяет наличие внешних мониторов
-   - Применяет соответствующие настройки сна
-
-2. **Каждые 2 секунды** (в автоматическом режиме):
-   - Проверяет активные дисплеи: `Screen.AllScreens`
-   - Проверяет физически подключенные: WMI (`WmiMonitorID`)
-   - Отслеживает состояние крышки и дисплея для автоматического сна
-
-3. **При изменении статуса**:
-   - Изменяет настройки Windows через `powercfg`: действие при закрытии крышки
-   - Вызывает `SetThreadExecutionState` для предотвращения сна
-   - Меняет иконку в зависимости от режима:
-     - 🔵 Синяя - авто + засыпать
-     - 🟡 Желтая - авто + не засыпать
-     - 🔷 Темно-синяя - ручной "Всегда засыпать"
-     - 🟠 Оранжевая - ручной "Всегда не засыпать"
-   - Воспроизводит звуковое уведомление
-
-4. **При выходе**:
-   - Проверяет текущий статус мониторов
-   - Применяет соответствующие настройки на основе наличия внешних мониторов
-
-### Автоматический сон (новая функция):
-
-В **автоматическом режиме** программа отслеживает специальную ситуацию:
-- Крышка ноутбука **уже закрыта** (определяется по отсутствию встроенного дисплея в списке активных)
-- Дисплей **выключился** (например, по таймауту энергосбережения или вручную)
-
-Когда обе эти условия выполнены, программа:
-1. ⏱️ Запускает 10-секундный таймер
-2. 💤 Через 10 секунд автоматически отправляет ноутбук в спящий режим
-3. ✅ Таймер сбрасывается, если дисплей включается раньше
-
-**Примеры использования:**
-- **Сценарий 1**: Работаете с внешним монитором, крышка закрыта. Уходите от компьютера, дисплей выключается через 5 минут → ноутбук уйдет в сон через 10 секунд после выключения дисплея
-- **Сценарий 2**: Работаете только с ноутбуком, крышка открыта. Дисплей выключился → ноутбук НЕ уйдет в сон (крышка открыта)
-- **Сценарий 3**: Закрыли крышку, но дисплей еще активен → ноутбук НЕ уйдет в сон немедленно, дождется выключения дисплея + 10 секунд
-
-**Примечание**: Эта функция работает ТОЛЬКО в автоматическом режиме. В ручных режимах ("Всегда не засыпать" / "Всегда засыпать") автоматический сон отключен.
-
-## Технические детали
-
-- **MonitorDetector** - определяет подключенные мониторы через `EnumDisplayMonitors` API и WMI
-- **PowerManager** - управляет состоянием питания через `SetThreadExecutionState` API и несколько методов перехода в сон
-- **TrayApplicationContext** - управляет иконкой в трее и логикой приложения
-
-### Методы перехода в спящий режим:
-
-Программа **автоматически определяет тип спящего режима** вашего ноутбука:
-
-#### Modern Standby (S0 Low Power Idle)
-Современные ноутбуки используют **Modern Standby** вместо классического S3:
-- ✅ Программа **выключает дисплей** вместо вызова SetSuspendState
-- ✅ Система автоматически входит в S0 Low Power Idle
-- ✅ Работает **мгновенно** без задержек
-- ✅ Совместимо с Connected Standby
-
-#### Классический режим (S3 Sleep)
-Для старых ноутбуков с поддержкой S3 программа тестирует **10 методов**:
-1. SetSuspendState(forceCritical=true, disableWakeEvent=false)
-2. SetSuspendState(forceCritical=false, disableWakeEvent=false)
-3. SetSuspendState(forceCritical=true, disableWakeEvent=true)
-4. Application.SetSuspendState(force=true)
-5. Application.SetSuspendState(force=false)
-6. rundll32.exe powrprof.dll,SetSuspendState Suspend
-7. rundll32.exe powrprof.dll,SetSuspendState 0,1,0
-8. cmd.exe /c rundll32.exe
-9. PowerShell с Add-Type
-10. PowerShell с P/Invoke
-
-**Программа автоматически выбирает правильный метод** в зависимости от вашей системы.
-
-## Примечания
-
-- Программа не изменяет системные настройки питания
-- Эффект действует только пока программа запущена
-- При закрытии программы все возвращается к стандартным настройкам
-- Требуются права обычного пользователя (администратор не нужен)
-
-## Устранение неполадок
-
-**Программа не запускается:**
-- Убедитесь, что установлен .NET 8.0 Runtime
-- Проверьте антивирус - добавьте программу в исключения
-
-**Ноутбук все равно засыпает:**
-- Убедитесь, что внешний монитор определяется системой (Параметры → Система → Дисплей)
-- Проверьте статус через двойной клик по иконке в трее
-
-**"Заснуть сейчас" не работает:**
-- Программа пробует 5 разных методов перехода в сон по очереди
-- При ошибке появится диалог с предложением открыть файл лога
-- Файл лога: `%AppData%\SleepMngr\sleep_log.txt`
-- В логе указано какие методы пробовались и почему не сработали
-- Обычно работает Метод 1 (`Application.SetSuspendState`) без прав администратора
-- Если ни один не работает:
-  1. Проверьте настройки питания Windows
-  2. Закройте все приложения, блокирующие сон
-  3. Попробуйте запустить от имени администратора
-  4. Проверьте групповые политики Windows (gpedit.msc)
-
-**Автоматический сон через 10 секунд не срабатывает:**
-- Убедитесь, что включен автоматический режим
-- Проверьте, что крышка действительно закрыта (в статусе должно быть "Физически подключенных: 2+")
-- Дисплей должен выключиться (по таймауту или вручную)
-
-**Хочу изменить интервал проверки:**
-- Откройте `TrayApplicationContext.cs`
-- Измените значение `monitorCheckTimer.Interval` (указано в миллисекундах)
-
-## Структура проекта
-
+```powershell
+dotnet run --project SleepMngr.csproj -c Release -- --self-test
 ```
-SleepMngr/
-├── SleepMngr.sln              # Solution файл
-├── build-compact.cmd          # Сборка компактного EXE
-├── build-standalone.cmd       # Сборка автономного EXE
-├── build-debug.cmd           # Обычная сборка для разработки
-├── clean.cmd                 # Очистка файлов сборки
-├── SleepMngr.csproj          # Конфигурация проекта
-├── Program.cs                # Точка входа, single instance
-├── TrayApplicationContext.cs # Основная логика, UI трея
-├── MonitorDetector.cs        # Определение мониторов
-├── PowerManager.cs           # Управление сном
-├── LidActionManager.cs       # Управление настройками крышки
-├── WakeManager.cs            # Управление пробуждением от мыши
-├── AutoStartManager.cs       # Управление автозапуском через реестр
-├── Settings.cs               # Сохранение/загрузка настроек (JSON)
-├── IconGenerator.cs          # Генерация цветных иконок
-├── WorkMode.cs               # Enum режимов работы
-├── README.md                 # Документация (русский)
-├── README.en.md              # Documentation (English)
-└── SleepMngr.Tests/          # Юнит-тесты (xUnit)
+
+The self-test checks error handling, including simulated non-elevated `powercfg` failures, without intentionally changing Windows power settings.
+
+## Automated builds and releases
+
+GitHub Actions builds both Windows variants on pushes and pull requests. Release builds run the same compile and self-test path before packaging.
+
+A versioned release produces:
+
+```text
+SleepMngr-win-x64-compact.zip
+SleepMngr-win-x64-standalone.zip
 ```
+
+The workflow also creates the GitHub Release automatically.
+
+## Troubleshooting
+
+### The laptop still sleeps in "Always prevent sleep"
+
+1. Open **Status** and verify that protection is active.
+2. Enable **Logging**.
+3. Switch to **Always prevent sleep** again.
+4. Open the log and look for `LidActionManager` and `PowerCfg` entries.
+5. If Windows reports access denied or another `powercfg` error, try running SleepMngr as Administrator to confirm whether permissions are the cause.
+
+### External monitor is not detected
+
+- Confirm that Windows sees the monitor in **Settings → System → Display**.
+- Open SleepMngr **Status** and compare active and physically attached display counts.
+- Disconnect/reconnect the monitor once; display-change events invalidate the WMI cache immediately.
+
+### `Sleep now` does not work
+
+Enable logging and run **Sleep now** again. On Modern Standby systems, look for an S0 Low Power Idle detection message. On classic S3 systems, the detailed trace shows the fallback sleep attempts.
+
+### Local build reports duplicate assembly attributes
+
+Update to the latest `main`, then run:
+
+```bat
+clean.cmd
+build-standalone.cmd
+```
+
+The main project explicitly excludes stale `SleepMngr.Tests/**` generated output so old local test artifacts do not get compiled into `SleepMngr.csproj`.
+
+## Key source files
+
+```text
+Program.cs                  application entry point and single-instance lifecycle
+TrayApplicationContext.cs   tray UI, modes, monitor transitions and auto-sleep logic
+MonitorDetector.cs          active/physical monitor detection and WMI cache
+PowerManager.cs             sleep prevention and sleep execution
+PowerCfgRunner.cs           safe powercfg process execution and diagnostics
+LidActionManager.cs         lid-close changes, save/restore and verification
+LidPowerSettings.cs         native PowrProf lid setting reads
+WakeManager.cs              mouse wake management
+Localization.cs             Russian/English UI selection
+AppLog.cs                   optional diagnostic logging
+AppSelfTest.cs              CI-safe self-test
+IconGenerator.cs            tray icon generation
+CHANGELOG.md                release history
+```
+
+## Release validation
+
+Version 1.0.0 was manually tested on real Windows laptop hardware for:
+
+- runtime English/Russian switching;
+- `Sleep now` on Modern Standby;
+- normal lid-close sleep;
+- **Always prevent sleep** with the lid closed;
+- external-monitor connect/disconnect detection and Automatic-mode switching;
+- optional logging and `powercfg` diagnostics.
+
+CI additionally validates build, self-test, compact publish, standalone publish, packaging, and release creation.
