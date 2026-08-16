@@ -2,6 +2,20 @@
 
 All notable changes to SleepMngr are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Restored the tray `Автозапуск / Start with Windows` option for the current user via `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+- Autostart writes are verified and failures remain non-fatal; actions are included in optional diagnostic logging.
+- Added autostart state to the detailed Status window.
+
+### Documentation
+
+- Reworked the main `README.md` as the English documentation.
+- Added a separate Russian `README.ru.md` with language links between both versions.
+- Updated documentation for v1.0.0 behavior, optional logging, `powercfg` diagnostics, Modern Standby, local builds, CI, and releases.
+
 ## [1.0.0] - 2026-08-16
 
 ### Added
