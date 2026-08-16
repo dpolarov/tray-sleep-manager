@@ -13,6 +13,7 @@ namespace SleepMngr
 
         private static readonly string LogFile = Path.Combine(AppDataDirectory, "sleep_log.txt");
         private static readonly string LoggingSettingFile = Path.Combine(AppDataDirectory, "logging.txt");
+        private static readonly string NullDevicePath = Path.Combine(AppDataDirectory, "NUL");
 
         private static bool enabled = LoadEnabled();
 
@@ -97,13 +98,15 @@ namespace SleepMngr
             try
             {
                 // PowerManager predates AppLog and still owns a private direct file
-                // writer for the detailed sleep trace. Route it to the Windows null
+                // writer for the detailed sleep trace. Route it to the Windows NUL
                 // device while logging is disabled so the global toggle is complete.
+                Directory.CreateDirectory(AppDataDirectory);
+
                 FieldInfo? field = typeof(PowerManager).GetField(
                     "logFile",
                     BindingFlags.Static | BindingFlags.NonPublic);
 
-                field?.SetValue(null, value ? LogFile : "NUL");
+                field?.SetValue(null, value ? LogFile : NullDevicePath);
             }
             catch
             {
