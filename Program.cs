@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -11,8 +12,11 @@ namespace SleepMngr
         private const string MutexName = "Global\\SleepMngr_SingleInstance";
 
         [STAThread]
-        static void Main()
+        static int Main(string[] args)
         {
+            if (args.Any(arg => arg.Equals("--self-test", StringComparison.OrdinalIgnoreCase)))
+                return AppSelfTest.Run();
+
             bool ownsMutex = false;
 
             try
@@ -32,7 +36,7 @@ namespace SleepMngr
                     {
                         _mutex.Dispose();
                         _mutex = null;
-                        return;
+                        return 0;
                     }
                 }
 
@@ -51,6 +55,8 @@ namespace SleepMngr
                 {
                     MonitorDetector.StopWatchingDisplayChanges();
                 }
+
+                return 0;
             }
             finally
             {
