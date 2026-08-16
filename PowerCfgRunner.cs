@@ -44,6 +44,8 @@ namespace SleepMngr
 
         public static PowerCfgResult Run(string arguments)
         {
+            AppLog.Write("PowerCfg", $"Command: powercfg.exe {arguments}");
+
             try
             {
                 var startInfo = new ProcessStartInfo
@@ -58,7 +60,7 @@ namespace SleepMngr
 
                 using var process = new Process { StartInfo = startInfo };
                 if (!process.Start())
-                    return new PowerCfgResult { Started = false };
+                    return LogResult(arguments, new PowerCfgResult { Started = false });
 
                 Task<string> outputTask = process.StandardOutput.ReadToEndAsync();
                 Task<string> errorTask = process.StandardError.ReadToEndAsync();
@@ -72,31 +74,41 @@ namespace SleepMngr
                     }
                     catch { }
 
-                    return new PowerCfgResult
+                    return LogResult(arguments, new PowerCfgResult
                     {
                         Started = true,
                         TimedOut = true,
                         Output = GetCompletedText(outputTask),
                         Error = GetCompletedText(errorTask)
-                    };
+                    });
                 }
 
-                return new PowerCfgResult
+                return LogResult(arguments, new PowerCfgResult
                 {
                     Started = true,
                     ExitCode = process.ExitCode,
                     Output = outputTask.GetAwaiter().GetResult(),
                     Error = errorTask.GetAwaiter().GetResult()
-                };
+                });
             }
             catch (Exception ex)
             {
-                return new PowerCfgResult
+                return LogResult(arguments, new PowerCfgResult
                 {
                     Started = false,
                     ExceptionMessage = ex.Message
-                };
+                });
             }
+        }
+
+        private static PowerCfgResult LogResult(string arguments, PowerCfgResult result)
+        {
+            if (result.Success)
+                AppLog.Write("PowerCfg", $"Result: success (exit 0) for {arguments}");
+            else
+                AppLog.Write("PowerCfg", $"Result: {result.DescribeFailure()} for {arguments}");
+
+            return result;
         }
 
         private static string GetCompletedText(Task<string> task)
