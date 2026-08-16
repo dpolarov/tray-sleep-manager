@@ -134,24 +134,29 @@ namespace SleepMngr
 
         private bool TryGetCurrentLidActions(out string acValue, out string dcValue, out string error)
         {
+            // Prefer the native PowrProf API. It returns numeric indexes directly and
+            // is independent of the Windows display language and console encoding.
+            if (LidPowerSettings.TryReadCurrent(out acValue, out dcValue, out string nativeError))
+            {
+                error = string.Empty;
+                return true;
+            }
+
+            // Keep powercfg parsing only as a compatibility fallback. Some unusual
+            // systems may reject the PowrProf read even though powercfg can query it.
             acValue = string.Empty;
             dcValue = string.Empty;
-
             var result = runPowerCfg("/query SCHEME_CURRENT SUB_BUTTONS LIDACTION");
             if (!result.Success)
             {
-                error = result.DescribeFailure();
+                error = $"PowrProf: {nativeError}; powercfg: {result.DescribeFailure()}";
                 return false;
             }
 
-            // The labels in powercfg output are localized. Microsoft documents that
-            // current setting indexes are emitted as hexadecimal 0x... values. In a
-            // setting-specific query the current AC/DC indexes are the final two hex
-            // values, so this does not depend on English/Russian/Slovak labels.
             MatchCollection matches = Regex.Matches(result.Output, @"0x([0-9a-fA-F]+)");
             if (matches.Count < 2)
             {
-                error = "could not find AC/DC setting indexes in localized powercfg output";
+                error = $"PowrProf: {nativeError}; powercfg fallback could not find AC/DC setting indexes";
                 return false;
             }
 
@@ -162,11 +167,12 @@ namespace SleepMngr
                 acValue = ac.ToString();
                 dcValue = dc.ToString();
                 error = string.Empty;
+                AppLog.Write("LidActionManager", $"PowrProf read failed; used powercfg fallback: {nativeError}");
                 return true;
             }
             catch (Exception ex)
             {
-                error = $"could not parse AC/DC setting indexes: {ex.Message}";
+                error = $"PowrProf: {nativeError}; powercfg fallback parse failed: {ex.Message}";
                 return false;
             }
         }
