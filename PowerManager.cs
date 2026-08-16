@@ -223,7 +223,7 @@ namespace SleepMngr
                     CreateNoWindow = true,
                     UseShellExecute = false
                 };
-                var process = Process.Start(psi);
+                using var process = Process.Start(psi);
                 if (process != null)
                 {
                     Log($"Method 6: Process started (PID: {process.Id})");
@@ -251,7 +251,7 @@ namespace SleepMngr
                     CreateNoWindow = true,
                     UseShellExecute = false
                 };
-                var process = Process.Start(psi);
+                using var process = Process.Start(psi);
                 if (process != null)
                 {
                     Log($"Method 7: Process started (PID: {process.Id})");
@@ -280,7 +280,7 @@ namespace SleepMngr
                     UseShellExecute = false,
                     WindowStyle = ProcessWindowStyle.Hidden
                 };
-                var process = Process.Start(psi);
+                using var process = Process.Start(psi);
                 if (process != null)
                 {
                     Log($"Method 8: Process started (PID: {process.Id})");
@@ -309,7 +309,7 @@ namespace SleepMngr
                     UseShellExecute = false,
                     WindowStyle = ProcessWindowStyle.Hidden
                 };
-                var process = Process.Start(psi);
+                using var process = Process.Start(psi);
                 if (process != null)
                 {
                     Log($"Method 9: Process started (PID: {process.Id})");
@@ -338,7 +338,7 @@ namespace SleepMngr
                     UseShellExecute = false,
                     WindowStyle = ProcessWindowStyle.Hidden
                 };
-                var process = Process.Start(psi);
+                using var process = Process.Start(psi);
                 if (process != null)
                 {
                     Log($"Method 10: Process started (PID: {process.Id})");
@@ -392,7 +392,7 @@ namespace SleepMngr
                     RedirectStandardOutput = true
                 };
                 
-                var process = Process.Start(psi);
+                using var process = Process.Start(psi);
                 if (process != null)
                 {
                     string output = process.StandardOutput.ReadToEnd();
@@ -445,20 +445,23 @@ namespace SleepMngr
                 var processes = Process.GetProcesses();
                 foreach (var proc in processes)
                 {
-                    try
+                    using (proc)
                     {
-                        string name = proc.ProcessName.ToLower();
-                        // Известные процессы блокирующие сон
-                        if (name.Contains("teams") || name.Contains("zoom") || 
-                            name.Contains("skype") || name.Contains("discord") ||
-                            name.Contains("steam") || name.Contains("epic") ||
-                            name.Contains("slack") || name.Contains("chrome") ||
-                            name.Contains("firefox"))
+                        try
                         {
-                            blockingProcesses.Add(proc.ProcessName);
+                            string name = proc.ProcessName.ToLower();
+                            // Известные процессы блокирующие сон
+                            if (name.Contains("teams") || name.Contains("zoom") || 
+                                name.Contains("skype") || name.Contains("discord") ||
+                                name.Contains("steam") || name.Contains("epic") ||
+                                name.Contains("slack") || name.Contains("chrome") ||
+                                name.Contains("firefox"))
+                            {
+                                blockingProcesses.Add(proc.ProcessName);
+                            }
                         }
+                        catch { }
                     }
-                    catch { }
                 }
                 
                 if (blockingProcesses.Count > 0)
@@ -494,7 +497,7 @@ namespace SleepMngr
                     RedirectStandardError = true
                 };
                 
-                var process = Process.Start(psi);
+                using var process = Process.Start(psi);
                 if (process != null)
                 {
                     string output = process.StandardOutput.ReadToEnd();
