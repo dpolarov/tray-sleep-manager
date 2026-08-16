@@ -5,11 +5,21 @@ using System.Text;
 using System.Windows.Forms;
 using System.Management;
 using System.Drawing;
+using Microsoft.Win32;
 
 namespace SleepMngr
 {
     public class MonitorDetector
     {
+        private static readonly object CacheLock = new();
+        private static readonly TimeSpan WmiCacheDuration = TimeSpan.FromSeconds(10);
+        private static int? cachedTotalMonitorCount;
+        private static DateTime totalMonitorCountCachedAtUtc = DateTime.MinValue;
+        private static List<string>? cachedMonitorFriendlyNames;
+        private static DateTime monitorFriendlyNamesCachedAtUtc = DateTime.MinValue;
+        private static int cacheGeneration;
+        private static bool displayChangeWatcherStarted;
+
         [DllImport("user32.dll")]
         private static extern bool EnumDisplayDevices(string? lpDevice, uint iDevNum, ref DISPLAY_DEVICE lpDisplayDevice, uint dwFlags);
         
@@ -72,6 +82,59 @@ namespace SleepMngr
 
         private const uint DISPLAY_DEVICE_ATTACHED_TO_DESKTOP = 0x00000001;
         private const uint DISPLAY_DEVICE_PRIMARY_DEVICE = 0x00000004;
+
+        public static void StartWatchingDisplayChanges()
+        {
+            lock (CacheLock)
+            {
+                if (displayChangeWatcherStarted)
+                    return;
+
+                try
+                {
+                    SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+                    displayChangeWatcherStarted = true;
+                }
+                catch
+                {
+                    // The 10-second cache still works if SystemEvents is unavailable.
+                }
+            }
+        }
+
+        public static void StopWatchingDisplayChanges()
+        {
+            lock (CacheLock)
+            {
+                if (!displayChangeWatcherStarted)
+                    return;
+
+                try
+                {
+                    SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+                }
+                catch { }
+
+                displayChangeWatcherStarted = false;
+            }
+        }
+
+        public static void InvalidateWmiCache()
+        {
+            lock (CacheLock)
+            {
+                cacheGeneration++;
+                cachedTotalMonitorCount = null;
+                totalMonitorCountCachedAtUtc = DateTime.MinValue;
+                cachedMonitorFriendlyNames = null;
+                monitorFriendlyNamesCachedAtUtc = DateTime.MinValue;
+            }
+        }
+
+        private static void OnDisplaySettingsChanged(object? sender, EventArgs e)
+        {
+            InvalidateWmiCache();
+        }
 
         public static bool HasExternalMonitor()
         {
@@ -164,6 +227,38 @@ namespace SleepMngr
         
         private static int GetTotalMonitorCountWMI()
         {
+            int generation;
+            DateTime nowUtc = DateTime.UtcNow;
+
+            lock (CacheLock)
+            {
+                if (cachedTotalMonitorCount.HasValue &&
+                    nowUtc - totalMonitorCountCachedAtUtc < WmiCacheDuration)
+                {
+                    return cachedTotalMonitorCount.Value;
+                }
+
+                generation = cacheGeneration;
+            }
+
+            int count = QueryTotalMonitorCountWMI();
+
+            lock (CacheLock)
+            {
+                // Do not repopulate the cache with stale data if a display-change
+                // event invalidated it while the WMI query was running.
+                if (generation == cacheGeneration)
+                {
+                    cachedTotalMonitorCount = count;
+                    totalMonitorCountCachedAtUtc = DateTime.UtcNow;
+                }
+            }
+
+            return count;
+        }
+
+        private static int QueryTotalMonitorCountWMI()
+        {
             try
             {
                 // Пробуем через Win32_PnPEntity - видит все устройства, даже отключенные
@@ -173,24 +268,28 @@ namespace SleepMngr
                     "SELECT * FROM Win32_PnPEntity WHERE (PNPClass = 'Monitor' OR Caption LIKE '%Monitor%' OR Caption LIKE '%Display%')"))
                 {
                     searcher.Options = wmiOptions;
-                    foreach (ManagementObject device in searcher.Get())
+                    using var results = searcher.Get();
+                    foreach (ManagementObject device in results)
                     {
-                        try
+                        using (device)
                         {
-                            string caption = device["Caption"]?.ToString() ?? "";
-                            string pnpClass = device["PNPClass"]?.ToString() ?? "";
-                            
-                            // Исключаем виртуальные мониторы и драйверы
-                            if (!string.IsNullOrEmpty(caption) && 
-                                !caption.Contains("Microsoft") &&
-                                !caption.Contains("Remote") &&
-                                !caption.Contains("Virtual") &&
-                                (pnpClass == "Monitor" || caption.ToLower().Contains("display")))
+                            try
                             {
-                                count++;
+                                string caption = device["Caption"]?.ToString() ?? "";
+                                string pnpClass = device["PNPClass"]?.ToString() ?? "";
+                                
+                                // Исключаем виртуальные мониторы и драйверы
+                                if (!string.IsNullOrEmpty(caption) && 
+                                    !caption.Contains("Microsoft") &&
+                                    !caption.Contains("Remote") &&
+                                    !caption.Contains("Virtual") &&
+                                    (pnpClass == "Monitor" || caption.ToLower().Contains("display")))
+                                {
+                                    count++;
+                                }
                             }
+                            catch { }
                         }
-                        catch { }
                     }
                 }
                 
@@ -203,9 +302,13 @@ namespace SleepMngr
                     "SELECT * FROM WmiMonitorID"))
                 {
                     searcher.Options = wmiOptions;
-                    foreach (var monitor in searcher.Get())
+                    using var results = searcher.Get();
+                    foreach (ManagementObject monitor in results)
                     {
-                        count++;
+                        using (monitor)
+                        {
+                            count++;
+                        }
                     }
                 }
                 
@@ -358,6 +461,36 @@ namespace SleepMngr
         
         private static List<string> GetAllMonitorFriendlyNames()
         {
+            int generation;
+            DateTime nowUtc = DateTime.UtcNow;
+
+            lock (CacheLock)
+            {
+                if (cachedMonitorFriendlyNames != null &&
+                    nowUtc - monitorFriendlyNamesCachedAtUtc < WmiCacheDuration)
+                {
+                    return new List<string>(cachedMonitorFriendlyNames);
+                }
+
+                generation = cacheGeneration;
+            }
+
+            List<string> names = QueryAllMonitorFriendlyNamesWMI();
+
+            lock (CacheLock)
+            {
+                if (generation == cacheGeneration)
+                {
+                    cachedMonitorFriendlyNames = new List<string>(names);
+                    monitorFriendlyNamesCachedAtUtc = DateTime.UtcNow;
+                }
+            }
+
+            return names;
+        }
+
+        private static List<string> QueryAllMonitorFriendlyNamesWMI()
+        {
             var names = new List<string>();
             
             try
@@ -367,22 +500,27 @@ namespace SleepMngr
                     "SELECT * FROM WmiMonitorID"))
                 {
                     searcher.Options = nameOptions;
-                    foreach (ManagementObject monitor in searcher.Get())
+                    using var results = searcher.Get();
+                    foreach (ManagementObject monitor in results)
                     {
-                        // Получаем UserFriendlyName
-                        var userFriendlyName = monitor["UserFriendlyName"] as ushort[];
-                        if (userFriendlyName != null && userFriendlyName.Length > 0)
+                        using (monitor)
                         {
-                            string name = "";
-                            foreach (ushort c in userFriendlyName)
+                            // Получаем UserFriendlyName
+                            var userFriendlyName = monitor["UserFriendlyName"] as ushort[];
+                            if (userFriendlyName != null && userFriendlyName.Length > 0)
                             {
-                                if (c == 0) break;
-                                name += (char)c;
-                            }
-                            
-                            if (!string.IsNullOrWhiteSpace(name))
-                            {
-                                names.Add(name.Trim());
+                                var nameBuilder = new StringBuilder();
+                                foreach (ushort c in userFriendlyName)
+                                {
+                                    if (c == 0) break;
+                                    nameBuilder.Append((char)c);
+                                }
+                                
+                                string name = nameBuilder.ToString();
+                                if (!string.IsNullOrWhiteSpace(name))
+                                {
+                                    names.Add(name.Trim());
+                                }
                             }
                         }
                     }
