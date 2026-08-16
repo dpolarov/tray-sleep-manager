@@ -7,6 +7,10 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>SleepMngr</AssemblyName>
     <ApplicationIcon>app.ico</ApplicationIcon>
+
+    <!-- Keep stale/local test projects under SleepMngr.Tests from being globbed
+         into the main WinForms project by the SDK default Compile items. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);SleepMngr.Tests/**</DefaultItemExcludes>
     
     <!-- Single file publish settings - without runtime -->
     <PublishSingleFile>true</PublishSingleFile>
