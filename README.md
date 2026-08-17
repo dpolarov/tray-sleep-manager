@@ -8,8 +8,8 @@
 
 SleepMngr is a small Windows tray utility for laptops used with external monitors. It automatically changes sleep protection and the lid-close action so a laptop can keep running in clamshell mode, while still returning to normal sleep behavior when the external display is disconnected.
 
-![SleepMngr status](image.png)
-![SleepMngr tray menu](image-1.png)
+![SleepMngr status](docs/image_en.png)
+![SleepMngr tray menu](docs/image-1_en.png)
 
 ## Download
 
