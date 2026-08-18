@@ -35,7 +35,11 @@ namespace SleepMngr
             runPowerCfg = powerCfgRunner;
 
             if (loadPersistedState)
+            {
                 LoadPersistedOriginals();
+                System.Windows.Forms.Application.ApplicationExit += OnApplicationExit;
+                AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
+            }
         }
 
         public string? LastError { get; private set; }
@@ -207,6 +211,31 @@ namespace SleepMngr
             originalsSaved = false;
             originalLidActionAC = null;
             originalLidActionDC = null;
+        }
+
+        private void OnApplicationExit(object? sender, EventArgs e)
+        {
+            TryRestoreOnShutdown("ApplicationExit");
+        }
+
+        private void OnProcessExit(object? sender, EventArgs e)
+        {
+            TryRestoreOnShutdown("ProcessExit");
+        }
+
+        private void TryRestoreOnShutdown(string source)
+        {
+            if (!isModified)
+                return;
+
+            AppLog.Write("LidActionManager", $"{source}: restoring original lid settings before exit");
+            if (!RestoreLidAction())
+            {
+                // Keep the recovery file intact. A later instance can retry.
+                AppLog.Write(
+                    "LidActionManager",
+                    $"{source}: restore failed; persisted recovery state retained; {LastError}");
+            }
         }
 
         private bool ApplyLidActions(string acValue, string dcValue, out string error)
