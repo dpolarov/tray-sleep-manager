@@ -1,24 +1,41 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text.RegularExpressions;
 
 namespace SleepMngr
 {
     public class LidActionManager
     {
+        private static readonly string StateDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "SleepMngr");
+
+        private static readonly string PersistedOriginalsFile = Path.Combine(
+            StateDirectory,
+            "lid_original.txt");
+
         private readonly Func<string, PowerCfgResult> runPowerCfg;
         private string? originalLidActionAC;
         private string? originalLidActionDC;
         private bool isModified;
         private bool originalsSaved;
 
-        public LidActionManager() : this(PowerCfgRunner.Run)
+        public LidActionManager() : this(PowerCfgRunner.Run, loadPersistedState: true)
         {
         }
 
         internal LidActionManager(Func<string, PowerCfgResult> powerCfgRunner)
+            : this(powerCfgRunner, loadPersistedState: false)
+        {
+        }
+
+        private LidActionManager(Func<string, PowerCfgResult> powerCfgRunner, bool loadPersistedState)
         {
             runPowerCfg = powerCfgRunner;
+
+            if (loadPersistedState)
+                LoadPersistedOriginals();
         }
 
         public string? LastError { get; private set; }
@@ -44,7 +61,17 @@ namespace SleepMngr
                 originalLidActionDC!,
                 out string rollbackError);
 
-            isModified = !rollbackOk;
+            if (rollbackOk)
+            {
+                ClearSavedOriginals();
+            }
+            else
+            {
+                // Keep the persisted originals. A later application start can then
+                // recover them even if this process terminates before restoration.
+                isModified = true;
+            }
+
             string message = $"Could not set lid action to Do nothing: {applyError}";
             if (!rollbackOk)
                 message += $" | Rollback also failed: {rollbackError}";
@@ -72,7 +99,10 @@ namespace SleepMngr
                 return false;
             }
 
-            isModified = false;
+            AppLog.Write(
+                "LidActionManager",
+                $"Restored original lid settings: AC={originalLidActionAC}, DC={originalLidActionDC}");
+            ClearSavedOriginals();
             return true;
         }
 
@@ -87,11 +117,96 @@ namespace SleepMngr
                 return false;
             }
 
+            // Persist before changing Windows. If the process is killed after the
+            // powercfg write, the next instance must still know what to restore.
+            if (!TryPersistOriginals(ac, dc, out string persistError))
+            {
+                SetLastError($"Could not persist original lid settings: {persistError}");
+                return false;
+            }
+
             originalLidActionAC = ac;
             originalLidActionDC = dc;
             originalsSaved = true;
             AppLog.Write("LidActionManager", $"Saved original lid settings: AC={ac}, DC={dc}");
             return true;
+        }
+
+        private void LoadPersistedOriginals()
+        {
+            try
+            {
+                if (!File.Exists(PersistedOriginalsFile))
+                    return;
+
+                string[] parts = File.ReadAllText(PersistedOriginalsFile)
+                    .Trim()
+                    .Split('|', StringSplitOptions.TrimEntries);
+
+                if (parts.Length != 2 ||
+                    !uint.TryParse(parts[0], out _) ||
+                    !uint.TryParse(parts[1], out _))
+                {
+                    AppLog.Write(
+                        "LidActionManager",
+                        $"Ignoring invalid persisted lid settings in {PersistedOriginalsFile}");
+                    return;
+                }
+
+                originalLidActionAC = parts[0];
+                originalLidActionDC = parts[1];
+                originalsSaved = true;
+
+                // File existence means a previous instance had started changing the
+                // lid action and had not confirmed restoration. Treat it as modified
+                // conservatively so Auto/no-monitor startup restores the saved values.
+                isModified = true;
+                AppLog.Write(
+                    "LidActionManager",
+                    $"Recovered persisted original lid settings: AC={originalLidActionAC}, DC={originalLidActionDC}");
+            }
+            catch (Exception ex)
+            {
+                AppLog.Write("LidActionManager", $"Could not load persisted lid settings: {ex.Message}");
+            }
+        }
+
+        private static bool TryPersistOriginals(string acValue, string dcValue, out string error)
+        {
+            try
+            {
+                Directory.CreateDirectory(StateDirectory);
+                File.WriteAllText(PersistedOriginalsFile, $"{acValue}|{dcValue}");
+                error = string.Empty;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
+            }
+        }
+
+        private void ClearSavedOriginals()
+        {
+            try
+            {
+                if (File.Exists(PersistedOriginalsFile))
+                    File.Delete(PersistedOriginalsFile);
+            }
+            catch (Exception ex)
+            {
+                // Restoration itself already succeeded. Keep running, but make the
+                // stale recovery-file failure visible for diagnostics.
+                AppLog.Write(
+                    "LidActionManager",
+                    $"Could not delete persisted lid settings after restore: {ex.Message}");
+            }
+
+            isModified = false;
+            originalsSaved = false;
+            originalLidActionAC = null;
+            originalLidActionDC = null;
         }
 
         private bool ApplyLidActions(string acValue, string dcValue, out string error)
@@ -195,10 +310,7 @@ namespace SleepMngr
                 return false;
             }
 
-            isModified = false;
-            originalsSaved = false;
-            originalLidActionAC = null;
-            originalLidActionDC = null;
+            ClearSavedOriginals();
             return true;
         }
     }
