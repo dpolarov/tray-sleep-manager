@@ -2,6 +2,21 @@
 
 All notable changes to SleepMngr are documented in this file.
 
+## [1.0.2] - 2026-08-18
+
+### Fixed
+
+- Fixed a Modern Standby hang where broadcasting the display-off command with synchronous `SendMessage(HWND_BROADCAST, ...)` could block the tray UI for several minutes if another top-level window did not respond. The display-off request now uses non-blocking `PostMessage` and reports Win32 errors when posting fails.
+- Fixed loss of the user's original lid-close AC/DC settings across exit, forced process replacement, crash, or restart. Original lid settings are now persisted to `%AppData%\SleepMngr\lid_original.txt` before the app changes them, recovered by the next instance when needed, and removed only after a verified restore.
+- Normal shutdown now retries restoration of the original lid settings through application/process exit hooks.
+
+### Validated
+
+- On a real Modern Standby laptop, external-monitor disconnect with the lid closed triggers AutoSleep without freezing SleepMngr.
+- The display-off request returns immediately and Windows locks the session immediately afterward.
+- Original lid settings were repeatedly saved as `AC=1, DC=1`, restored to `AC=1, DC=1` on disconnect, and correctly saved again after reconnect.
+- Repeated external-monitor connect/disconnect cycles remained consistent after the recovery changes.
+
 ## [1.0.1] - 2026-08-16
 
 ### Added
