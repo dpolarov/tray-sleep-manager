@@ -35,8 +35,9 @@ namespace SleepMngr
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool SetSuspendState(bool hibernate, bool forceCritical, bool disableWakeEvent);
 
-        [DllImport("user32.dll", CharSet = CharSet.Auto)]
-        private static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
         private const uint WM_SYSCOMMAND = 0x0112;
         private const int SC_MONITORPOWER = 0xF170;
@@ -419,8 +420,20 @@ namespace SleepMngr
             try
             {
                 Log("Turning off display (Modern Standby compatible)");
-                SendMessage(HWND_BROADCAST, WM_SYSCOMMAND, new IntPtr(SC_MONITORPOWER), new IntPtr(MONITOR_OFF));
-                Log("Display off command sent - system will enter S0 Low Power Idle automatically");
+                bool posted = PostMessage(
+                    HWND_BROADCAST,
+                    WM_SYSCOMMAND,
+                    new IntPtr(SC_MONITORPOWER),
+                    new IntPtr(MONITOR_OFF));
+
+                if (!posted)
+                {
+                    int error = Marshal.GetLastWin32Error();
+                    Log($"TurnOffDisplay failed: PostMessage returned false (Win32 error {error})");
+                    return false;
+                }
+
+                Log("Display off command posted asynchronously - system can enter S0 Low Power Idle without blocking SleepMngr");
                 return true;
             }
             catch (Exception ex)
