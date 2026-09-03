@@ -20,6 +20,8 @@ namespace SleepMngr
         private static DateTime totalMonitorCountCachedAtUtc = DateTime.MinValue;
         private static List<string>? cachedMonitorFriendlyNames;
         private static DateTime monitorFriendlyNamesCachedAtUtc = DateTime.MinValue;
+        private static ActiveConnectionState? cachedActiveConnectionState;
+        private static DateTime activeConnectionStateCachedAtUtc = DateTime.MinValue;
         private static int cacheGeneration;
         private static bool displayChangeWatcherStarted;
 
@@ -83,8 +85,29 @@ namespace SleepMngr
             public string DeviceKey;
         }
 
+        private readonly struct ActiveConnectionState
+        {
+            public ActiveConnectionState(bool dataAvailable, bool hasExternal, bool hasInternal)
+            {
+                DataAvailable = dataAvailable;
+                HasExternal = hasExternal;
+                HasInternal = hasInternal;
+            }
+
+            public bool DataAvailable { get; }
+            public bool HasExternal { get; }
+            public bool HasInternal { get; }
+        }
+
         private const uint DISPLAY_DEVICE_ATTACHED_TO_DESKTOP = 0x00000001;
         private const uint DISPLAY_DEVICE_PRIMARY_DEVICE = 0x00000004;
+
+        // D3DKMDT_VIDEO_OUTPUT_TECHNOLOGY values used by WmiMonitorConnectionParams.
+        private const uint VIDEO_OUTPUT_LVDS = 6;
+        private const uint VIDEO_OUTPUT_DISPLAYPORT_EMBEDDED = 11;
+        private const uint VIDEO_OUTPUT_UDI_EMBEDDED = 13;
+        private const uint VIDEO_OUTPUT_INTERNAL = 0x80000000;
+        private const uint VIDEO_OUTPUT_UNINITIALIZED = 0xFFFFFFFE;
 
         public static void StartWatchingDisplayChanges()
         {
@@ -131,6 +154,8 @@ namespace SleepMngr
                 totalMonitorCountCachedAtUtc = DateTime.MinValue;
                 cachedMonitorFriendlyNames = null;
                 monitorFriendlyNamesCachedAtUtc = DateTime.MinValue;
+                cachedActiveConnectionState = null;
+                activeConnectionStateCachedAtUtc = DateTime.MinValue;
             }
         }
 
@@ -141,81 +166,200 @@ namespace SleepMngr
 
         public static bool HasExternalMonitor()
         {
-            // ПРОСТАЯ ЛОГИКА: если физически подключено 2+ монитора - есть внешний
+            // Prefer Windows' connection technology. This correctly handles clamshell
+            // mode where the built-in panel disappears and only one external display
+            // remains active (for example HDMI/DisplayPort).
+            ActiveConnectionState connectionState = GetActiveConnectionState();
+            if (connectionState.DataAvailable)
+            {
+                if (connectionState.HasExternal)
+                    return true;
+
+                // If Windows explicitly reports only an internal active connection,
+                // do not let stale/phantom PnP monitor records create a false positive.
+                if (connectionState.HasInternal && GetMonitorCount() == 1)
+                    return false;
+            }
+
             int totalMonitors = GetTotalMonitorCountWMI();
-            
-            // Если WMI показывает 2+ монитора - точно есть внешний
-            if (totalMonitors >= 2)
-                return true;
-            
-            // Дополнительная проверка через активные дисплеи
             int activeCount = GetMonitorCount();
-            
-            // Если больше 1 активного дисплея - точно есть внешний
+
             if (activeCount > 1)
                 return true;
-            
-            // Если 1 активный, но WMI недоступен - проверяем по названию
-            if (totalMonitors == 0 && activeCount == 1)
+
+            // WMI/PnP counts can be 1 in clamshell mode. Always classify the single
+            // active display instead of doing so only when WMI returned zero.
+            if (activeCount == 1 && IsExternalMonitorActive())
+                return true;
+
+            // Keep the old count-based behavior only as a fallback when connection
+            // technology is unavailable and no single-display classification worked.
+            return !connectionState.DataAvailable && totalMonitors >= 2;
+        }
+
+        public static bool IsExternalOnlyActive()
+        {
+            if (GetMonitorCount() != 1)
+                return false;
+
+            ActiveConnectionState connectionState = GetActiveConnectionState();
+            if (connectionState.DataAvailable &&
+                (connectionState.HasExternal || connectionState.HasInternal))
             {
-                return IsExternalMonitorActive();
+                return connectionState.HasExternal && !connectionState.HasInternal;
             }
-            
-            return false;
+
+            return IsExternalMonitorActive();
+        }
+
+        private static ActiveConnectionState GetActiveConnectionState()
+        {
+            int generation;
+            DateTime nowUtc = DateTime.UtcNow;
+
+            lock (CacheLock)
+            {
+                if (cachedActiveConnectionState.HasValue &&
+                    nowUtc - activeConnectionStateCachedAtUtc < WmiCacheDuration)
+                {
+                    return cachedActiveConnectionState.Value;
+                }
+
+                generation = cacheGeneration;
+            }
+
+            ActiveConnectionState state = QueryActiveConnectionStateWmi();
+
+            lock (CacheLock)
+            {
+                if (generation == cacheGeneration)
+                {
+                    cachedActiveConnectionState = state;
+                    activeConnectionStateCachedAtUtc = DateTime.UtcNow;
+                }
+            }
+
+            return state;
+        }
+
+        private static ActiveConnectionState QueryActiveConnectionStateWmi()
+        {
+            try
+            {
+                bool sawActiveConnection = false;
+                bool hasExternal = false;
+                bool hasInternal = false;
+
+                var options = new EnumerationOptions { Timeout = TimeSpan.FromSeconds(3) };
+                using var searcher = new ManagementObjectSearcher(
+                    "root\\WMI",
+                    "SELECT Active, VideoOutputTechnology FROM WmiMonitorConnectionParams");
+                searcher.Options = options;
+
+                using var results = searcher.Get();
+                foreach (ManagementObject monitor in results)
+                {
+                    using (monitor)
+                    {
+                        try
+                        {
+                            bool active = monitor["Active"] is bool value && value;
+                            if (!active)
+                                continue;
+
+                            sawActiveConnection = true;
+                            uint technology = Convert.ToUInt32(monitor["VideoOutputTechnology"]);
+
+                            if (IsInternalOutputTechnology(technology))
+                            {
+                                hasInternal = true;
+                            }
+                            else if (technology != VIDEO_OUTPUT_UNINITIALIZED)
+                            {
+                                // OTHER (-1), VGA, DVI, HDMI, external DisplayPort,
+                                // Miracast, indirect wired displays, etc. are external.
+                                hasExternal = true;
+                            }
+                        }
+                        catch { }
+                    }
+                }
+
+                return new ActiveConnectionState(sawActiveConnection, hasExternal, hasInternal);
+            }
+            catch
+            {
+                return new ActiveConnectionState(false, false, false);
+            }
+        }
+
+        private static bool IsInternalOutputTechnology(uint technology)
+        {
+            return technology == VIDEO_OUTPUT_LVDS ||
+                   technology == VIDEO_OUTPUT_DISPLAYPORT_EMBEDDED ||
+                   technology == VIDEO_OUTPUT_UDI_EMBEDDED ||
+                   technology == VIDEO_OUTPUT_INTERNAL;
         }
         
         private static bool IsExternalMonitorActive()
         {
             try
             {
-                // Получаем список всех активных дисплеев
                 var displays = GetActiveDisplays();
-                
                 if (displays.Count != 1)
                     return false;
-                
+
                 var display = displays[0];
-                string deviceString = display.DeviceString.ToLower();
-                string friendlyName = display.FriendlyName.ToLower();
-                
-                // Признаки встроенного дисплея:
-                // 1. Название совпадает с устройством (например, "\\.\DISPLAY2" == "\\.\DISPLAY2")
-                if (display.DeviceString == display.DeviceName || 
-                    deviceString.StartsWith("\\\\.\\display"))
+                string deviceString = display.DeviceString.ToLowerInvariant();
+                string friendlyName = display.FriendlyName.ToLowerInvariant();
+
+                // Known internal-panel EDID vendor prefixes. These names frequently
+                // contain model digits too, so the generic model-number heuristic must
+                // not classify them as external.
+                string[] internalPrefixes = { "boe", "auo", "cmn", "cso", "lgd", "sdc", "shp", "inx" };
+                foreach (string prefix in internalPrefixes)
                 {
-                    return false; // Это встроенный дисплей
+                    if (friendlyName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                        return false;
                 }
-                
-                // 2. Содержит "Generic PnP Monitor" или просто "Generic"
-                if (deviceString.Contains("generic pnp monitor") ||
+
+                // Common external monitor names and EDID vendor prefixes. PHL is the
+                // EDID manufacturer code used by many Philips monitors.
+                string[] externalMarkers =
+                {
+                    "dell", "del ", "hp ", "hwp", "samsung", "sam ", "lg ", "gsm",
+                    "acer", "acr", "asus", "aci", "benq", "bnq", "philips", "phl",
+                    "aoc", "viewsonic", "vsc", "lenovo", "len ", "msi"
+                };
+
+                foreach (string marker in externalMarkers)
+                {
+                    if (friendlyName.Contains(marker, StringComparison.OrdinalIgnoreCase) ||
+                        deviceString.Contains(marker, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+
+                bool genericDevice =
+                    string.IsNullOrWhiteSpace(deviceString) ||
+                    deviceString.Contains("generic pnp monitor") ||
                     deviceString.Contains("generic monitor") ||
-                    (deviceString == "generic" || friendlyName == "generic"))
-                {
-                    return false; // Встроенный
-                }
-                
-                // 3. Название пустое или очень короткое (меньше 5 символов)
-                if (string.IsNullOrWhiteSpace(friendlyName) || friendlyName.Length < 5)
-                {
-                    return false; // Встроенный
-                }
-                
-                // Признаки внешнего монитора:
-                // 1. Имеет конкретное название производителя
-                bool hasManufacturer = 
-                    friendlyName.Contains("dell") || friendlyName.Contains("hp") ||
-                    friendlyName.Contains("samsung") || friendlyName.Contains("lg") ||
-                    friendlyName.Contains("acer") || friendlyName.Contains("asus") ||
-                    friendlyName.Contains("benq") || friendlyName.Contains("philips") ||
-                    friendlyName.Contains("aoc") || friendlyName.Contains("viewsonic") ||
-                    friendlyName.Contains("lenovo");
-                
-                // 2. Имеет модель с цифрами (P24h-10, U2720Q и т.д.)
-                bool hasModelNumber = 
+                    deviceString.StartsWith("\\\\.\\display");
+
+                bool genericFriendlyName =
+                    string.IsNullOrWhiteSpace(friendlyName) ||
+                    friendlyName == "generic" ||
+                    friendlyName.Contains("generic pnp monitor");
+
+                if (genericDevice && genericFriendlyName)
+                    return false;
+
+                bool hasModelNumber =
                     System.Text.RegularExpressions.Regex.IsMatch(friendlyName, @"[a-z]\d{2}") ||
                     System.Text.RegularExpressions.Regex.IsMatch(friendlyName, @"\d{2}[a-z]");
-                
-                return hasManufacturer || hasModelNumber;
+
+                return hasModelNumber;
             }
             catch
             {
