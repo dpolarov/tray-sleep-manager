@@ -450,19 +450,13 @@ namespace SleepMngr
                 var result = PowerCfgRunner.Run("/requests");
                 Log("=== powercfg /requests output ===");
 
-                if (!result.Started)
+                if (!result.Started || result.TimedOut)
                 {
-                    Log($"powercfg /requests could not start: {result.ErrorMessage}");
+                    Log(result.DescribeFailure());
                     return;
                 }
 
-                if (result.TimedOut)
-                {
-                    Log("powercfg /requests timed out");
-                    return;
-                }
-
-                string output = result.StandardOutput;
+                string output = result.Output;
                 if (string.IsNullOrWhiteSpace(output))
                 {
                     Log("No active requests blocking sleep");
