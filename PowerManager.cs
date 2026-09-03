@@ -55,9 +55,12 @@ namespace SleepMngr
         }
 
         private static bool isPreventingSleep = false;
+        private static Timer? pendingClamshellSleepTimer;
 
         public static void PreventSleep()
         {
+            CancelPendingClamshellSleep();
+
             if (!isPreventingSleep)
             {
                 SetThreadExecutionState(
@@ -70,11 +73,73 @@ namespace SleepMngr
 
         public static void AllowSleep()
         {
+            bool releasedProtection = false;
+
             if (isPreventingSleep)
             {
                 SetThreadExecutionState(EXECUTION_STATE.ES_CONTINUOUS);
                 isPreventingSleep = false;
+                releasedProtection = true;
             }
+
+            // Changing the Windows lid action to Sleep does not replay an old lid-close
+            // event. If protection is being released while only an external display is
+            // active, the laptop is already in a clamshell-like topology. Schedule an
+            // explicit sleep after UpdatePowerState has had time to restore the lid
+            // action, rather than waiting for a lid event that already happened.
+            if (releasedProtection && MonitorDetector.IsExternalOnlyActive())
+            {
+                ScheduleClamshellSleep();
+            }
+            else if (!releasedProtection)
+            {
+                CancelPendingClamshellSleep();
+            }
+        }
+
+        private static void ScheduleClamshellSleep()
+        {
+            CancelPendingClamshellSleep();
+            Log("Sleep protection released while only an external display is active; scheduling sleep after lid settings restore");
+
+            var timer = new Timer { Interval = 300 };
+            pendingClamshellSleepTimer = timer;
+            timer.Tick += (_, _) =>
+            {
+                timer.Stop();
+                timer.Dispose();
+
+                if (ReferenceEquals(pendingClamshellSleepTimer, timer))
+                    pendingClamshellSleepTimer = null;
+
+                // Re-check topology because display state can change during the short
+                // delay (dock reconnect, lid opening, display-mode change, etc.).
+                if (!MonitorDetector.IsExternalOnlyActive())
+                {
+                    Log("Scheduled clamshell sleep cancelled: topology changed before execution");
+                    return;
+                }
+
+                Log("Executing sleep after sleep protection was released in clamshell mode");
+                if (!GoToSleep())
+                    Log("Clamshell mode sleep command reported failure");
+            };
+            timer.Start();
+        }
+
+        private static void CancelPendingClamshellSleep()
+        {
+            if (pendingClamshellSleepTimer == null)
+                return;
+
+            try
+            {
+                pendingClamshellSleepTimer.Stop();
+                pendingClamshellSleepTimer.Dispose();
+            }
+            catch { }
+
+            pendingClamshellSleepTimer = null;
         }
 
         public static bool IsPreventingSleep()
